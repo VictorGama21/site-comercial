@@ -92,6 +92,7 @@ def concluir_visit(visit_id: int, user_id: int):
     conn.commit()
     conn.close()
 
+
 def seed_data():
     conn = get_conn()
     cur = conn.cursor()
@@ -161,11 +162,12 @@ def page_minhas_visitas_loja():
         st.warning("Usuário não associado a nenhuma loja.")
         return
 
+    # Filtro padrão: hoje → +7 dias
     col1, col2 = st.columns(2)
     with col1:
-        start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
+        start = st.date_input("Início", value=date.today(), format="DD/MM/YYYY")
     with col2:
-        end = st.date_input("Fim", value=date.today() + timedelta(days=30), format="DD/MM/YYYY")
+        end = st.date_input("Fim", value=date.today() + timedelta(days=7), format="DD/MM/YYYY")
 
     status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
 
@@ -178,6 +180,19 @@ def page_minhas_visitas_loja():
     st.dataframe(style_table(df), use_container_width=True, hide_index=True)
     st.metric("Total de visitas", len(df))
     st.metric("Concluídas", (df["status"] == "Concluída").sum())
+
+    # --- Marcar visita como concluída ---
+    st.subheader("✔️ Concluir Visita")
+    visitas_pendentes = df[df["status"] == "Pendente"]
+
+    if visitas_pendentes.empty:
+        st.info("Nenhuma visita pendente para concluir.")
+    else:
+        visit_id = st.selectbox("Selecione a visita", visitas_pendentes["id"].tolist())
+        if st.button("Marcar como Concluída"):
+            concluir_visit(visit_id, user["id"])
+            st.success("Visita marcada como concluída com sucesso!")
+            st.rerun()
 
 
 def get_suppliers():
