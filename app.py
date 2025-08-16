@@ -314,22 +314,30 @@ def style_table(df):
 def page_agendar_visita():
     st.header("Agendar Visita")
 
-    # Garantir que submit_done exista
-    if "submit_done" not in st.session_state:
-        st.session_state.submit_done = False
-
-    # Carregar dados necessários
     stores = get_stores()
-    compradores = ["Aldo", "Eduardo", "Henrique", "Jose Duda", "Thiago", "Victor", "Robson", "Outro"]
     store_map = dict(zip(stores["name"], stores["id"]))
     fornecedores_sugestao = get_suppliers()["name"].tolist()
+    compradores = ["Aldo", "Eduardo", "Henrique", "Jose Duda", "Thiago", "Victor", "Robson", "Outro"]
 
-    # Formulário
+    # Inicializa campos apenas uma vez
+    if "form_reset" not in st.session_state:
+        st.session_state.form_reset = True
+
+    if st.session_state.form_reset:
+        st.session_state.lojas_escolhidas = []
+        st.session_state.dt = date.today() + timedelta(days=1)
+        st.session_state.comprador = "Aldo"
+        st.session_state.fornecedor = ""
+        st.session_state.segmento = SEGMENTOS_FIXOS[0]
+        st.session_state.garantia = ""
+        st.session_state.info = ""
+        st.session_state.repetir = False
+        st.session_state.form_reset = False  # não resetar de novo automaticamente
+
     with st.form("form_agendar"):
-        # Campos com chave de estado
         lojas_escolhidas = st.multiselect("Lojas", stores["name"].tolist(), key="lojas_escolhidas")
-        dt = st.date_input("Data", value=st.session_state.get("dt", date.today() + timedelta(days=1)), key="dt")
-        comprador = st.selectbox("Comprador responsável", compradores, index=0, key="comprador")
+        dt = st.date_input("Data", format="DD/MM/YYYY", key="dt")
+        comprador = st.selectbox("Comprador responsável", compradores, key="comprador")
         fornecedor = st.text_input("Fornecedor", key="fornecedor")
         segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS, key="segmento")
         garantia = st.selectbox("Garantia comercial", ["", "Sim", "Não", "A confirmar"], key="garantia")
@@ -338,37 +346,29 @@ def page_agendar_visita():
 
         submitted = st.form_submit_button("Agendar")
 
-    # Após envio
     if submitted:
-        if not lojas_escolhidas:
-            st.warning("Por favor, selecione ao menos uma loja.")
+        if not lojas_escolhidas or not fornecedor:
+            st.warning("Preencha todos os campos obrigatórios.")
+        else:
+            store_ids = [store_map[l] for l in lojas_escolhidas]
+            create_visit(
+                store_ids=store_ids,
+                visit_date=dt,
+                buyer=comprador,
+                supplier=fornecedor,
+                segment=segmento,
+                warranty=garantia,
+                info=info,
+                created_by=st.session_state.user["id"],
+                repeat_weekly=repetir
+            )
+            st.success("✅ Visita agendada com sucesso!")
+
+            # Ativa o reset do formulário para a próxima renderização
+            st.session_state.form_reset = True
+
+            # Para a execução agora para evitar reenvio ou rerender imediato
             st.stop()
-        if not fornecedor.strip():
-            st.warning("Fornecedor é obrigatório.")
-            st.stop()
-
-        store_ids = [store_map[l] for l in lojas_escolhidas]
-        create_visit(
-            store_ids=store_ids,
-            visit_date=dt,
-            buyer=comprador,
-            supplier=fornecedor,
-            segment=segmento,
-            warranty=garantia,
-            info=info,
-            created_by=st.session_state.user["id"],
-            repeat_weekly=repetir
-        )
-
-        st.success("✅ Visita agendada com sucesso!")
-
-        # Limpar campos: isso evita reenvio automático
-        st.session_state.lojas_escolhidas = []   # remove seleção para forçar nova
-        st.session_state.fornecedor = ""
-        st.session_state.info = ""
-        st.session_state.submit_done = True
-
-        st.stop()  # Interrompe a execução para evitar nova submissão
 
 
 def page_dashboard_comercial():
