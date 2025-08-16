@@ -182,23 +182,32 @@ def page_minhas_visitas_loja():
 
     st.subheader("📋 Lista de Visitas")
 
-    # Mostrar visitas em formato de tabela com botão por linha
+    # Mostrar visitas em formato de cartão por linha
     for _, row in df.iterrows():
-        col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
-        col1.write(f"**Data:** {row['data']}")
-        col2.write(f"**Fornecedor:** {row['fornecedor']}")
-        col3.write(f"**Segmento:** {row['segmento']}")
-        col4.write(f"**Status:** {row['status']}")
+        with st.container():
+            col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
 
-        if row["status"] == "Pendente":
-            if col5.button("✅ Concluir", key=f"concluir_{row['id']}"):
-                concluir_visit(row["id"], user["id"])
-                st.success(f"Visita {row['id']} concluída com sucesso!")
-                st.rerun()
-        else:
-            col5.write("✔️")
+            col1.write(f"📅 **Data:** {row['data']}")
+            col2.write(f"📆 **Dia da semana:** {row['dia_semana']}")
+            col3.write(f"👤 **Comprador:** {row['comprador']}")
+            col4.write(f"🏢 **Fornecedor:** {row['fornecedor']}")
+            col5.write(f"📦 **Segmento:** {row['segmento']}")
 
+            col1, col2, col3 = st.columns([2, 2, 4])
+            col1.write(f"🛡 **Garantia:** {row['garantia']}")
+            col2.write(f"📌 **Status:** {row['status']}")
+            col3.write(f"📝 **Info:** {row['info'] if row['info'] else '-'}")
 
+            # Botão de concluir
+            if row["status"] == "Pendente":
+                if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
+                    concluir_visit(row["id"], user["id"])
+                    st.success(f"Visita {row['id']} concluída com sucesso!")
+                    st.rerun()
+            else:
+                st.write("✔️ **Já concluída**")
+
+            st.markdown("---")  # separador entre visitas
 
 def get_suppliers():
     conn = get_conn()
