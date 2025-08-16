@@ -78,6 +78,19 @@ def init_db():
 
     conn.commit()
     conn.close()
+    
+def concluir_visit(visit_id: int, user_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Concluída',
+            completed_at = CURRENT_TIMESTAMP,
+            completed_by = %s
+        WHERE id = %s;
+    """, (user_id, visit_id))
+    conn.commit()
+    conn.close()
 
 def seed_data():
     conn = get_conn()
