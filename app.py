@@ -139,6 +139,25 @@ def get_stores():
     df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
     conn.close()
     return df
+    
+def page_minhas_visitas_loja():
+    st.header("Minhas Visitas")
+
+    user = st.session_state.user
+    if not user or user["store_id"] is None:
+        st.warning("Usuário não associado a nenhuma loja.")
+        return
+
+    start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
+    end = st.date_input("Fim", value=date.today() + timedelta(days=30), format="DD/MM/YYYY")
+
+    df = list_visits(store_id=user["store_id"], start=start, end=end)
+
+    if df.empty:
+        st.info("Nenhuma visita agendada para o período selecionado.")
+        return
+
+    st.dataframe(style_table(df), use_container_width=True, hide_index=True)
 
 def get_suppliers():
     conn = get_conn()
