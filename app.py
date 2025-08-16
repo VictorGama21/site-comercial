@@ -148,16 +148,24 @@ def page_minhas_visitas_loja():
         st.warning("Usuário não associado a nenhuma loja.")
         return
 
-    start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
-    end = st.date_input("Fim", value=date.today() + timedelta(days=30), format="DD/MM/YYYY")
+    col1, col2 = st.columns(2)
+    with col1:
+        start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
+    with col2:
+        end = st.date_input("Fim", value=date.today() + timedelta(days=30), format="DD/MM/YYYY")
 
-    df = list_visits(store_id=user["store_id"], start=start, end=end)
+    status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
+
+    df = list_visits(store_id=user["store_id"], status=status, start=start, end=end)
 
     if df.empty:
-        st.info("Nenhuma visita agendada para o período selecionado.")
+        st.info("Nenhuma visita encontrada para os filtros selecionados.")
         return
 
     st.dataframe(style_table(df), use_container_width=True, hide_index=True)
+    st.metric("Total de visitas", len(df))
+    st.metric("Concluídas", (df["status"] == "Concluída").sum())
+
 
 def get_suppliers():
     conn = get_conn()
