@@ -360,14 +360,14 @@ def login_form():
                 "store_id": user[5]
             }
             st.success(f"Bem-vindo(a), {user[2]}!")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Email ou senha incorretos.")
             
 def logout_button():
     if st.sidebar.button("Sair"):
         st.session_state.user = None
-        st.experimental_rerun()
+        st.rerun()
 
 
 # -----------------------------
