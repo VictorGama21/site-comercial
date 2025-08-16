@@ -312,25 +312,24 @@ def style_table(df):
 # Páginas
 # -----------------------------
 def page_agendar_visita():
-    # Zerar valores após submit
+    st.header("Agendar Visita")
+
+    # Garantir que submit_done exista
     if "submit_done" not in st.session_state:
         st.session_state.submit_done = False
 
-    with st.form("form_agendar"):
-        if st.session_state.submit_done:
-            st.session_state.lojas_escolhidas = []
-            st.session_state.dt = date.today() + timedelta(days=1)
-            st.session_state.comprador = "Aldo"
-            st.session_state.fornecedor = ""
-            st.session_state.segmento = SEGMENTOS_FIXOS[0]
-            st.session_state.garantia = ""
-            st.session_state.info = ""
-            st.session_state.repetir = False
-            st.session_state.submit_done = False
+    # Carregar dados necessários
+    stores = get_stores()
+    compradores = ["Aldo", "Eduardo", "Henrique", "Jose Duda", "Thiago", "Victor", "Robson", "Outro"]
+    store_map = dict(zip(stores["name"], stores["id"]))
+    fornecedores_sugestao = get_suppliers()["name"].tolist()
 
+    # Formulário
+    with st.form("form_agendar"):
+        # Campos com chave de estado
         lojas_escolhidas = st.multiselect("Lojas", stores["name"].tolist(), key="lojas_escolhidas")
-        dt = st.date_input("Data", format="DD/MM/YYYY", key="dt")
-        comprador = st.selectbox("Comprador responsável", compradores, key="comprador")
+        dt = st.date_input("Data", value=st.session_state.get("dt", date.today() + timedelta(days=1)), key="dt")
+        comprador = st.selectbox("Comprador responsável", compradores, index=0, key="comprador")
         fornecedor = st.text_input("Fornecedor", key="fornecedor")
         segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS, key="segmento")
         garantia = st.selectbox("Garantia comercial", ["", "Sim", "Não", "A confirmar"], key="garantia")
@@ -339,10 +338,18 @@ def page_agendar_visita():
 
         submitted = st.form_submit_button("Agendar")
 
+    # Após envio
     if submitted:
-        # aqui grava no banco, etc
+        if not lojas_escolhidas:
+            st.warning("Por favor, selecione ao menos uma loja.")
+            st.stop()
+        if not fornecedor.strip():
+            st.warning("Fornecedor é obrigatório.")
+            st.stop()
+
+        store_ids = [store_map[l] for l in lojas_escolhidas]
         create_visit(
-            store_ids=[store_map[l] for l in lojas_escolhidas],
+            store_ids=store_ids,
             visit_date=dt,
             buyer=comprador,
             supplier=fornecedor,
@@ -352,11 +359,17 @@ def page_agendar_visita():
             created_by=st.session_state.user["id"],
             repeat_weekly=repetir
         )
-        st.success("Visita agendada com sucesso!")
 
-        # marca para zerar na próxima rerun
+        st.success("✅ Visita agendada com sucesso!")
+
+        # Limpar campos: isso evita reenvio automático
+        st.session_state.lojas_escolhidas = []   # remove seleção para forçar nova
+        st.session_state.fornecedor = ""
+        st.session_state.info = ""
         st.session_state.submit_done = True
-        st.experimental_rerun()
+
+        st.stop()  # Interrompe a execução para evitar nova submissão
+
 
 def page_dashboard_comercial():
     st.header("Agenda Geral")
