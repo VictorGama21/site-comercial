@@ -338,6 +338,38 @@ def page_dashboard_comercial():
                 st.warning("Visita excluída!")
                 st.rerun()
 
+def login_form():
+    st.title("Login - Sistema de Visitas")
+
+    email = st.text_input("Email")
+    password = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT id, email, name, role, password_hash, store_id FROM users WHERE email = %s;", (email,))
+        user = cur.fetchone()
+        conn.close()
+
+        if user and verify_password(password, user[4]):
+            st.session_state.user = {
+                "id": user[0],
+                "email": user[1],
+                "name": user[2],
+                "role": user[3],
+                "store_id": user[5]
+            }
+            st.success(f"Bem-vindo(a), {user[2]}!")
+            st.experimental_rerun()
+        else:
+            st.error("Email ou senha incorretos.")
+            
+def logout_button():
+    if st.sidebar.button("Sair"):
+        st.session_state.user = None
+        st.experimental_rerun()
+
+
 # -----------------------------
 # App principal
 # -----------------------------
