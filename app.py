@@ -309,6 +309,7 @@ def page_dashboard_comercial():
     st.header("Agenda Geral")
     stores = get_stores()
     stores_filter = ["Todas"] + stores["name"].tolist()
+    dias_semana = ["Todos"] + list(WEEKDAYS_PT.values())
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -317,12 +318,22 @@ def page_dashboard_comercial():
     with col2:
         status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
     with col3:
+        dia_semana = st.selectbox("Dia da semana", dias_semana)
+
+    col4, col5 = st.columns(2)
+    with col4:
         start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
+    with col5:
         end = st.date_input("Fim", value=date.today() + timedelta(days=60), format="DD/MM/YYYY")
 
     df = list_visits(store_id=loja_id, status=status, start=start, end=end)
+
+    # Filtro adicional por dia da semana
+    if dia_semana != "Todos":
+        df = df[df["dia_semana"] == dia_semana]
+
     if df.empty:
-        st.info("Sem visitas no período.")
+        st.info("Sem visitas no período ou nos filtros selecionados.")
         return
 
     st.dataframe(style_table(df), use_container_width=True, hide_index=True)
