@@ -1,12 +1,13 @@
 import streamlit as st
 import psycopg2
 import pandas as pd
-from datetime import date, timedelta
+from datetime import datetime, date, timedelta
 import hashlib
 from dateutil.relativedelta import relativedelta
 import unidecode
 import os
 from dotenv import load_dotenv
+import plotly.express as px
 
 load_dotenv()
 
@@ -63,7 +64,7 @@ def init_db():
             visit_date DATE NOT NULL,
             weekday TEXT NOT NULL,
             buyer TEXT,
-            supplier TEXT,
+            supplier_id INTEGER REFERENCES suppliers(id),
             segment TEXT,
             warranty TEXT,
             info TEXT,
@@ -74,10 +75,6 @@ def init_db():
             completed_by INTEGER REFERENCES users(id)
         );
     """)
-
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_visits_date ON visits(visit_date);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_visits_store ON visits(store_id);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_visits_supplier ON visits(supplier);")
 
     conn.commit()
     conn.close()
@@ -130,53 +127,50 @@ WEEKDAYS_PT = {
     6: "Domingo",
 }
 
+SEGMENTOS_FIXOS = [
+    "HORTIFRUTIGRANJEIRO", "EMBALAGEM", "CONGELADOS", "LATICINIOS", "SUPLEMENTOS",
+    "PADARIA", "BEBIDAS", "MERCEARIA", "GRANJEIROS", "ACOUGUE", "OLEOS",
+    "HIGIENE E BELEZA", "PET", "LIMPEZA DA CASA", "ECOMMERCE", "ROTISSERIA",
+    "FRIOS E EMBUTIDOS", "QUEIJOS", "FLORICULTURA", "EMPORIO", "BAZAR"
+]
+
 def get_stores():
     conn = get_conn()
     df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
     conn.close()
     return df
 
-def get_user_by_email(email: str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id, email, name, role, password_hash, store_id FROM users WHERE email=%s;", (email,))
-    row = cur.fetchone()
-    conn.close()
-    if row:
-        keys = ["id", "email", "name", "role", "password_hash", "store_id"]
-        return dict(zip(keys, row))
-    return None
-
 def get_suppliers():
     conn = get_conn()
-    df = pd.read_sql_query("SELECT name FROM suppliers ORDER BY name;", conn)
+    df = pd.read_sql_query("SELECT id, name FROM suppliers ORDER BY name;", conn)
     conn.close()
-    return df["name"].dropna().tolist()
+    return df
 
-def add_supplier_if_not_exists(name: str):
-    if not name.strip():
-        return
+def ensure_supplier(name: str):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("INSERT INTO suppliers(name) VALUES(%s) ON CONFLICT DO NOTHING;", (name.strip(),))
+    cur.execute("INSERT INTO suppliers(name) VALUES(%s) ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name RETURNING id;", (name.strip(),))
+    supplier_id = cur.fetchone()[0]
     conn.commit()
     conn.close()
+    return supplier_id
 
-def create_visit(store_ids: list, visit_date: date, buyer: str, supplier: str, segment: str, warranty: str, info: str, created_by: int, repeat_weekly=False):
+def create_visit(store_ids, visit_date: date, buyer: str, supplier: str, segment: str, warranty: str, info: str, created_by: int, repeat_weekly=False):
+    supplier_id = ensure_supplier(supplier)
     conn = get_conn()
     cur = conn.cursor()
 
-    def insert_one(sid, vdate):
+    def insert_one(vdate, store_id):
         cur.execute("""
-            INSERT INTO visits (store_id, visit_date, weekday, buyer, supplier, segment, warranty, info, status, created_by)
+            INSERT INTO visits (store_id, visit_date, weekday, buyer, supplier_id, segment, warranty, info, status, created_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pendente', %s);
-        """, (sid, vdate, WEEKDAYS_PT[vdate.weekday()], buyer.strip(), supplier.strip(), segment.strip(), warranty.strip(), info.strip(), created_by))
+        """, (store_id, vdate, WEEKDAYS_PT[vdate.weekday()], buyer, supplier_id, segment, warranty, info, created_by))
 
-    for sid in store_ids:
-        insert_one(sid, visit_date)
+    for store_id in store_ids:
+        insert_one(visit_date, store_id)
         if repeat_weekly:
             for i in range(1, 4):
-                insert_one(sid, visit_date + relativedelta(weeks=i))
+                insert_one(visit_date + relativedelta(weeks=i), store_id)
 
     conn.commit()
     conn.close()
@@ -184,9 +178,9 @@ def create_visit(store_ids: list, visit_date: date, buyer: str, supplier: str, s
 def list_visits(store_id=None, status=None, start=None, end=None):
     q = [
         "SELECT v.id, s.name AS loja, v.visit_date AS data, v.weekday AS dia_semana,",
-        "v.buyer AS comprador, v.supplier AS fornecedor, v.segment AS segmento,",
+        "v.buyer AS comprador, sp.name AS fornecedor, v.segment AS segmento,",
         "v.warranty AS garantia, v.info AS info, v.status",
-        "FROM visits v JOIN stores s ON s.id = v.store_id WHERE 1=1"
+        "FROM visits v JOIN stores s ON s.id = v.store_id JOIN suppliers sp ON sp.id = v.supplier_id WHERE 1=1"
     ]
     params = []
 
@@ -214,47 +208,36 @@ def list_visits(store_id=None, status=None, start=None, end=None):
         df["data"] = pd.to_datetime(df["data"]).dt.strftime("%d/%m/%Y")
     return df
 
-def mark_visit_completed(visit_id: int, user_id: int):
+def update_visit(visit_id: int, buyer: str, supplier: str, segment: str, warranty: str, info: str):
+    supplier_id = ensure_supplier(supplier)
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
         UPDATE visits
-        SET status = 'Concluída', completed_at = CURRENT_TIMESTAMP, completed_by = %s
-        WHERE id = %s;
-    """, (user_id, visit_id))
+        SET buyer=%s, supplier_id=%s, segment=%s, warranty=%s, info=%s
+        WHERE id=%s;
+    """, (buyer, supplier_id, segment, warranty, info, visit_id))
+    conn.commit()
+    conn.close()
+
+def delete_visit(visit_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM visits WHERE id=%s;", (visit_id,))
     conn.commit()
     conn.close()
 
 # -----------------------------
 # UI Helpers
 # -----------------------------
-def require_login():
-    if "user" not in st.session_state or st.session_state.user is None:
-        st.stop()
-
-def login_form():
-    st.subheader("Entrar")
-    with st.form("login_form"):
-        email = st.text_input("Email")
-        password = st.text_input("Senha", type="password")
-        submitted = st.form_submit_button("Entrar")
-
-    if submitted:
-        user = get_user_by_email(email.strip().lower())
-        if not user:
-            st.error("Usuário não encontrado.")
-            return
-        if not verify_password(password, user["password_hash"]):
-            st.error("Senha inválida.")
-            return
-        st.session_state.user = {k: user[k] for k in ["id", "email", "name", "role", "store_id"]}
-        st.success(f"Bem-vindo(a), {st.session_state.user['name']}!")
-        st.rerun()
-
-def logout_button():
-    if st.sidebar.button("Sair", use_container_width=True):
-        st.session_state.user = None
-        st.rerun()
+def style_table(df):
+    def highlight_status(val):
+        if val == "Concluída":
+            return "background-color: #90EE90; color: black;"
+        elif val == "Pendente":
+            return "background-color: #FF7F7F; color: black;"
+        return ""
+    return df.style.applymap(highlight_status, subset=["status"])
 
 # -----------------------------
 # Páginas
@@ -263,17 +246,15 @@ def page_agendar_visita():
     st.header("Agendar Visita")
     stores = get_stores()
     store_map = dict(zip(stores["name"], stores["id"]))
+    fornecedores_sugestao = get_suppliers()["name"].tolist()
     compradores = ["Aldo", "Eduardo", "Henrique", "Jose Duda", "Thiago", "Victor", "Robson", "Outro"]
-    fornecedores_sugestao = get_suppliers()
 
     with st.form("form_agendar"):
-        lojas_escolhidas = st.multiselect("Loja(s)", stores["name"].tolist())
+        lojas_escolhidas = st.multiselect("Lojas", stores["name"].tolist())
         dt = st.date_input("Data", value=date.today() + timedelta(days=1), format="DD/MM/YYYY")
         comprador = st.selectbox("Comprador responsável", compradores)
-        fornecedor = st.text_input("Fornecedor", placeholder="Digite o nome do fornecedor")
-        if fornecedores_sugestao:
-            st.caption("Sugestões já cadastradas: " + ", ".join(fornecedores_sugestao[:10]))
-        segmento = st.text_input("Segmento")
+        fornecedor = st.text_input("Fornecedor", value="")
+        segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS)
         garantia = st.selectbox("Garantia comercial", ["", "Sim", "Não", "A confirmar"])
         info = st.text_area("Informações")
         repetir = st.checkbox("Repetir toda semana (4 semanas)")
@@ -283,8 +264,7 @@ def page_agendar_visita():
         if not lojas_escolhidas or not fornecedor:
             st.warning("Preencha todos os campos obrigatórios.")
             return
-        store_ids = [store_map[nome] for nome in lojas_escolhidas]
-        add_supplier_if_not_exists(fornecedor)
+        store_ids = [store_map[l] for l in lojas_escolhidas]
         create_visit(
             store_ids=store_ids,
             visit_date=dt,
@@ -296,35 +276,7 @@ def page_agendar_visita():
             created_by=st.session_state.user["id"],
             repeat_weekly=repetir
         )
-        st.success("Visita(s) agendada(s) com sucesso!")
-
-def page_minhas_visitas_loja():
-    st.header("Minhas Visitas")
-    user = st.session_state.user
-    store_id = user["store_id"]
-
-    col1, col2 = st.columns(2)
-    with col1:
-        status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente"])
-    with col2:
-        start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
-        end = st.date_input("Fim", value=date.today() + timedelta(days=30), format="DD/MM/YYYY")
-
-    df = list_visits(store_id=store_id, status=status, start=start, end=end)
-    if df.empty:
-        st.info("Nenhuma visita encontrada.")
-        return
-
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    st.subheader("Marcar visita como concluída")
-    ids = df["id"].tolist()
-    if ids:
-        visit_id = st.selectbox("Selecionar visita", ids, format_func=lambda i: f"#{i} - {df.loc[df['id']==i, 'loja'].iloc[0]} - {df.loc[df['id']==i, 'data'].iloc[0]}")
-        if st.button("Concluir"):
-            mark_visit_completed(visit_id, user_id=user["id"])
-            st.success("Visita concluída.")
-            st.rerun()
+        st.success("Visita agendada com sucesso!")
 
 def page_dashboard_comercial():
     st.header("Agenda Geral")
@@ -346,19 +298,62 @@ def page_dashboard_comercial():
         st.info("Sem visitas no período.")
         return
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(style_table(df), use_container_width=True, hide_index=True)
     st.metric("Total de visitas", len(df))
     st.metric("Concluídas", (df["status"] == "Concluída").sum())
+
+    # Dashboard analítico
+    st.subheader("📊 Dashboard Analítico")
+    col1, col2 = st.columns(2)
+    with col1:
+        fig1 = px.histogram(df, x="segmento", color="status", title="Visitas por Segmento")
+        st.plotly_chart(fig1, use_container_width=True)
+    with col2:
+        fig2 = px.histogram(df, x="loja", color="status", title="Visitas por Loja")
+        st.plotly_chart(fig2, use_container_width=True)
+
+    fig3 = px.line(df, x="data", color="status", title="Evolução das Visitas")
+    st.plotly_chart(fig3, use_container_width=True)
+
+    # --- Editar e Excluir ---
+    st.subheader("Editar/Excluir Visitas")
+    visit_id = st.selectbox("Selecione uma visita", df["id"].tolist())
+    if visit_id:
+        vrow = df[df["id"] == visit_id].iloc[0]
+        comprador = st.text_input("Comprador", vrow["comprador"])
+        fornecedor = st.text_input("Fornecedor", vrow["fornecedor"])
+        segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS, index=SEGMENTOS_FIXOS.index(vrow["segmento"]) if vrow["segmento"] in SEGMENTOS_FIXOS else 0)
+        garantia = st.selectbox("Garantia", ["", "Sim", "Não", "A confirmar"], index=["", "Sim", "Não", "A confirmar"].index(vrow["garantia"]) if vrow["garantia"] in ["", "Sim", "Não", "A confirmar"] else 0)
+        info = st.text_area("Informações", vrow["info"])
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Salvar alterações"):
+                update_visit(visit_id, comprador, fornecedor, segmento, garantia, info)
+                st.success("Visita atualizada!")
+                st.rerun()
+        with col2:
+            if st.button("Excluir visita"):
+                delete_visit(visit_id)
+                st.warning("Visita excluída!")
+                st.rerun()
 
 # -----------------------------
 # App principal
 # -----------------------------
 def main():
     st.set_page_config(page_title="Sistema de Visitas", layout="wide")
+    st.markdown("""
+        <style>
+            body {background: linear-gradient(135deg, #FF8C42, #FFB347);} 
+            .stButton>button {background-color: #FF8C42; color: white; font-weight: bold; border-radius: 10px;}
+        </style>
+    """, unsafe_allow_html=True)
+
     init_db()
     seed_data()
 
-    st.sidebar.title("📅 Sistema de Visitas")
+    st.sidebar.title("📅 Sistema de Visitas - Quitandaria")
     if "user" not in st.session_state:
         st.session_state.user = None
 
