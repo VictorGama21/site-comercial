@@ -1,7 +1,7 @@
 import streamlit as st
 import psycopg2
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 import hashlib
 from dateutil.relativedelta import relativedelta
 import unidecode
@@ -50,6 +50,13 @@ def init_db():
     """)
 
     cur.execute("""
+        CREATE TABLE IF NOT EXISTS suppliers (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE
+        );
+    """)
+
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS visits (
             id SERIAL PRIMARY KEY,
             store_id INTEGER NOT NULL REFERENCES stores(id),
@@ -68,7 +75,6 @@ def init_db():
         );
     """)
 
-    # Índices para performance
     cur.execute("CREATE INDEX IF NOT EXISTS idx_visits_date ON visits(visit_date);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_visits_store ON visits(store_id);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_visits_supplier ON visits(supplier);")
@@ -143,26 +149,34 @@ def get_user_by_email(email: str):
 
 def get_suppliers():
     conn = get_conn()
-    df = pd.read_sql_query("SELECT DISTINCT supplier FROM visits WHERE supplier IS NOT NULL AND supplier <> '' ORDER BY supplier;", conn)
+    df = pd.read_sql_query("SELECT name FROM suppliers ORDER BY name;", conn)
     conn.close()
-    return df["supplier"].dropna().tolist()
+    return df["name"].dropna().tolist()
 
-def create_visit(store_id: int, visit_date: date, buyer: str, supplier: str, segment: str, warranty: str, info: str, created_by: int, repeat_weekly=False):
-    wd = WEEKDAYS_PT[visit_date.weekday()]
+def add_supplier_if_not_exists(name: str):
+    if not name.strip():
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO suppliers(name) VALUES(%s) ON CONFLICT DO NOTHING;", (name.strip(),))
+    conn.commit()
+    conn.close()
+
+def create_visit(store_ids: list, visit_date: date, buyer: str, supplier: str, segment: str, warranty: str, info: str, created_by: int, repeat_weekly=False):
     conn = get_conn()
     cur = conn.cursor()
 
-    def insert_one(vdate):
+    def insert_one(sid, vdate):
         cur.execute("""
             INSERT INTO visits (store_id, visit_date, weekday, buyer, supplier, segment, warranty, info, status, created_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pendente', %s);
-        """, (store_id, vdate, WEEKDAYS_PT[vdate.weekday()], buyer.strip(), supplier.strip(), segment.strip(), warranty.strip(), info.strip(), created_by))
+        """, (sid, vdate, WEEKDAYS_PT[vdate.weekday()], buyer.strip(), supplier.strip(), segment.strip(), warranty.strip(), info.strip(), created_by))
 
-    insert_one(visit_date)
-
-    if repeat_weekly:
-        for i in range(1, 4):
-            insert_one(visit_date + relativedelta(weeks=i))
+    for sid in store_ids:
+        insert_one(sid, visit_date)
+        if repeat_weekly:
+            for i in range(1, 4):
+                insert_one(sid, visit_date + relativedelta(weeks=i))
 
     conn.commit()
     conn.close()
@@ -253,10 +267,12 @@ def page_agendar_visita():
     fornecedores_sugestao = get_suppliers()
 
     with st.form("form_agendar"):
-        loja_nome = st.selectbox("Loja", stores["name"].tolist())
-        dt = st.date_input("Data", value=date.today() + timedelta(days=1))
+        lojas_escolhidas = st.multiselect("Loja(s)", stores["name"].tolist())
+        dt = st.date_input("Data", value=date.today() + timedelta(days=1), format="DD/MM/YYYY")
         comprador = st.selectbox("Comprador responsável", compradores)
-        fornecedor = st.selectbox("Fornecedor (sugestões)", [""] + fornecedores_sugestao)
+        fornecedor = st.text_input("Fornecedor", placeholder="Digite o nome do fornecedor")
+        if fornecedores_sugestao:
+            st.caption("Sugestões já cadastradas: " + ", ".join(fornecedores_sugestao[:10]))
         segmento = st.text_input("Segmento")
         garantia = st.selectbox("Garantia comercial", ["", "Sim", "Não", "A confirmar"])
         info = st.text_area("Informações")
@@ -264,11 +280,13 @@ def page_agendar_visita():
         submitted = st.form_submit_button("Agendar")
 
     if submitted:
-        if not loja_nome or not fornecedor:
+        if not lojas_escolhidas or not fornecedor:
             st.warning("Preencha todos os campos obrigatórios.")
             return
+        store_ids = [store_map[nome] for nome in lojas_escolhidas]
+        add_supplier_if_not_exists(fornecedor)
         create_visit(
-            store_id=store_map[loja_nome],
+            store_ids=store_ids,
             visit_date=dt,
             buyer=comprador,
             supplier=fornecedor,
@@ -278,7 +296,7 @@ def page_agendar_visita():
             created_by=st.session_state.user["id"],
             repeat_weekly=repetir
         )
-        st.success("Visita agendada com sucesso!")
+        st.success("Visita(s) agendada(s) com sucesso!")
 
 def page_minhas_visitas_loja():
     st.header("Minhas Visitas")
@@ -289,8 +307,8 @@ def page_minhas_visitas_loja():
     with col1:
         status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente"])
     with col2:
-        start = st.date_input("Início", value=date.today() - timedelta(days=7))
-        end = st.date_input("Fim", value=date.today() + timedelta(days=30))
+        start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
+        end = st.date_input("Fim", value=date.today() + timedelta(days=30), format="DD/MM/YYYY")
 
     df = list_visits(store_id=store_id, status=status, start=start, end=end)
     if df.empty:
@@ -320,8 +338,8 @@ def page_dashboard_comercial():
     with col2:
         status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
     with col3:
-        start = st.date_input("Início", value=date.today() - timedelta(days=7))
-        end = st.date_input("Fim", value=date.today() + timedelta(days=60))
+        start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
+        end = st.date_input("Fim", value=date.today() + timedelta(days=60), format="DD/MM/YYYY")
 
     df = list_visits(store_id=loja_id, status=status, start=start, end=end)
     if df.empty:
