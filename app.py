@@ -318,15 +318,33 @@ def page_agendar_visita():
     fornecedores_sugestao = get_suppliers()["name"].tolist()
     compradores = ["Aldo", "Eduardo", "Henrique", "Jose Duda", "Thiago", "Victor", "Robson", "Outro"]
 
+    # Inicializa session_state com valores padrão (uma vez só)
+    if "lojas_escolhidas" not in st.session_state:
+        st.session_state.lojas_escolhidas = []
+    if "dt" not in st.session_state:
+        st.session_state.dt = date.today() + timedelta(days=1)
+    if "comprador" not in st.session_state:
+        st.session_state.comprador = compradores[0]
+    if "fornecedor" not in st.session_state:
+        st.session_state.fornecedor = ""
+    if "segmento" not in st.session_state:
+        st.session_state.segmento = SEGMENTOS_FIXOS[0]
+    if "garantia" not in st.session_state:
+        st.session_state.garantia = ""
+    if "info" not in st.session_state:
+        st.session_state.info = ""
+    if "repetir" not in st.session_state:
+        st.session_state.repetir = False
+
     with st.form("form_agendar"):
-        lojas_escolhidas = st.multiselect("Lojas", stores["name"].tolist())
-        dt = st.date_input("Data", value=date.today() + timedelta(days=1), format="DD/MM/YYYY")
-        comprador = st.selectbox("Comprador responsável", compradores)
-        fornecedor = st.text_input("Fornecedor", value="")
-        segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS)
-        garantia = st.selectbox("Garantia comercial", ["", "Sim", "Não", "A confirmar"])
-        info = st.text_area("Informações")
-        repetir = st.checkbox("Repetir toda semana (4 semanas)")
+        lojas_escolhidas = st.multiselect("Lojas", stores["name"].tolist(), key="lojas_escolhidas")
+        dt = st.date_input("Data", value=st.session_state.dt, format="DD/MM/YYYY", key="dt")
+        comprador = st.selectbox("Comprador responsável", compradores, key="comprador")
+        fornecedor = st.text_input("Fornecedor", value=st.session_state.fornecedor, key="fornecedor")
+        segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS, key="segmento")
+        garantia = st.selectbox("Garantia comercial", ["", "Sim", "Não", "A confirmar"], key="garantia")
+        info = st.text_area("Informações", value=st.session_state.info, key="info")
+        repetir = st.checkbox("Repetir toda semana (4 semanas)", value=st.session_state.repetir, key="repetir")
         submitted = st.form_submit_button("Agendar")
 
     if submitted:
@@ -346,6 +364,20 @@ def page_agendar_visita():
             repeat_weekly=repetir
         )
         st.success("Visita agendada com sucesso!")
+
+        # Zerar os campos no session_state para limpar o formulário
+        st.session_state.lojas_escolhidas = []
+        st.session_state.dt = date.today() + timedelta(days=1)
+        st.session_state.comprador = compradores[0]
+        st.session_state.fornecedor = ""
+        st.session_state.segmento = SEGMENTOS_FIXOS[0]
+        st.session_state.garantia = ""
+        st.session_state.info = ""
+        st.session_state.repetir = False
+
+        # Opcional: dar um rerun para garantir que UI atualize (não obrigatório)
+        st.experimental_rerun()
+
 
 def page_dashboard_comercial():
     st.header("Agenda Geral")
