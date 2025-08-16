@@ -177,22 +177,27 @@ def page_minhas_visitas_loja():
         st.info("Nenhuma visita encontrada para os filtros selecionados.")
         return
 
-    st.dataframe(style_table(df), use_container_width=True, hide_index=True)
     st.metric("Total de visitas", len(df))
     st.metric("Concluídas", (df["status"] == "Concluída").sum())
 
-    # --- Marcar visita como concluída ---
-    st.subheader("✔️ Concluir Visita")
-    visitas_pendentes = df[df["status"] == "Pendente"]
+    st.subheader("📋 Lista de Visitas")
 
-    if visitas_pendentes.empty:
-        st.info("Nenhuma visita pendente para concluir.")
-    else:
-        visit_id = st.selectbox("Selecione a visita", visitas_pendentes["id"].tolist())
-        if st.button("Marcar como Concluída"):
-            concluir_visit(visit_id, user["id"])
-            st.success("Visita marcada como concluída com sucesso!")
-            st.rerun()
+    # Mostrar visitas em formato de tabela com botão por linha
+    for _, row in df.iterrows():
+        col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
+        col1.write(f"**Data:** {row['data']}")
+        col2.write(f"**Fornecedor:** {row['fornecedor']}")
+        col3.write(f"**Segmento:** {row['segmento']}")
+        col4.write(f"**Status:** {row['status']}")
+
+        if row["status"] == "Pendente":
+            if col5.button("✅ Concluir", key=f"concluir_{row['id']}"):
+                concluir_visit(row["id"], user["id"])
+                st.success(f"Visita {row['id']} concluída com sucesso!")
+                st.rerun()
+        else:
+            col5.write("✔️")
+
 
 
 def get_suppliers():
