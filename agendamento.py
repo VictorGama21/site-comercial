@@ -273,6 +273,20 @@ def logout_button():
     if st.sidebar.button("Terminar sessão", use_container_width=True):
         st.session_state.user = None
         st.rerun()
+        
+def concluir_visit(visit_id: int, user_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Concluída',
+            completed_at = CURRENT_TIMESTAMP,
+            completed_by = %s
+        WHERE id = %s;
+    """, (user_id, visit_id))
+    conn.commit()
+    conn.close()
+
 
 # -----------------------------
 # Páginas
@@ -315,34 +329,45 @@ def page_agendar_visita():
 
 
 def page_minhas_visitas_loja():
-    st.header("Minhas Visitas (Loja)")
+    st.header("Minhas Visitas")
 
     user = st.session_state.user
-    store_id = user["store_id"]
-
-    colf1, colf2 = st.columns(2)
-    with colf1:
-        status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente"])
-    with colf2:
-        start = st.date_input("Início", value=date.today() - relativedelta(days=7))
-        end = st.date_input("Fim", value=date.today() + relativedelta(days=30))
-
-    df = list_visits(store_id=store_id, status=status, start=start, end=end)
-
-    if df.empty:
-        st.info("Nenhuma visita encontrada para o período/estado selecionado.")
+    if not user or user["store_id"] is None:
+        st.warning("Usuário não associado a nenhuma loja.")
         return
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    # Filtro padrão: hoje → +7 dias
+    col1, col2 = st.columns(2)
+    with col1:
+        start = st.date_input("Início", value=date.today(), format="DD/MM/YYYY")
+    with col2:
+        end = st.date_input("Fim", value=date.today() + timedelta(days=7), format="DD/MM/YYYY")
 
-    st.subheader("Marcar visita como concluída")
-    ids = df["id"].tolist()
-    if ids:
-        visit_id = st.selectbox("Selecionar visita", ids, format_func=lambda i: f"#{i} - {df.loc[df['id']==i, 'loja'].iloc[0]} - {df.loc[df['id']==i, 'data'].iloc[0]}")
-        if st.button("Marcar Concluída"):
-            mark_visit_completed(visit_id, user_id=user["id"])
-            st.success("Visita marcada como concluída.")
+    status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
+
+    df = list_visits(store_id=user["store_id"], status=status, start=start, end=end)
+
+    if df.empty:
+        st.info("Nenhuma visita encontrada para os filtros selecionados.")
+        return
+
+    st.dataframe(style_table(df), use_container_width=True, hide_index=True)
+    st.metric("Total de visitas", len(df))
+    st.metric("Concluídas", (df["status"] == "Concluída").sum())
+
+    # --- Marcar visita como concluída ---
+    st.subheader("✔️ Concluir Visita")
+    visitas_pendentes = df[df["status"] == "Pendente"]
+
+    if visitas_pendentes.empty:
+        st.info("Nenhuma visita pendente para concluir.")
+    else:
+        visit_id = st.selectbox("Selecione a visita", visitas_pendentes["id"].tolist())
+        if st.button("Marcar como Concluída"):
+            concluir_visit(visit_id, user["id"])
+            st.success("Visita marcada como concluída com sucesso!")
             st.rerun()
+
 
 def page_dashboard_comercial():
     st.header("Agenda Geral (Comercial)")
