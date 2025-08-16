@@ -338,13 +338,13 @@ def page_agendar_visita():
 
     with st.form("form_agendar"):
         lojas_escolhidas = st.multiselect("Lojas", stores["name"].tolist(), key="lojas_escolhidas")
-        dt = st.date_input("Data", value=st.session_state.dt, format="DD/MM/YYYY", key="dt")
+        dt = st.date_input("Data", format="DD/MM/YYYY", key="dt")
         comprador = st.selectbox("Comprador responsável", compradores, key="comprador")
-        fornecedor = st.text_input("Fornecedor", value=st.session_state.fornecedor, key="fornecedor")
+        fornecedor = st.text_input("Fornecedor", key="fornecedor")
         segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS, key="segmento")
         garantia = st.selectbox("Garantia comercial", ["", "Sim", "Não", "A confirmar"], key="garantia")
-        info = st.text_area("Informações", value=st.session_state.info, key="info")
-        repetir = st.checkbox("Repetir toda semana (4 semanas)", value=st.session_state.repetir, key="repetir")
+        info = st.text_area("Informações", key="info")
+        repetir = st.checkbox("Repetir toda semana (4 semanas)", key="repetir")
         submitted = st.form_submit_button("Agendar")
 
     if submitted:
