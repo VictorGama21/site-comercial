@@ -176,6 +176,7 @@ def page_minhas_visitas_loja():
 
     df = list_visits(store_id=user["store_id"], status=status, start=start, end=end)
 
+    # Filtro por dia da semana
     if dia_semana != "Todos":
         df = df[df["dia_semana"] == dia_semana]
 
@@ -183,16 +184,20 @@ def page_minhas_visitas_loja():
         st.info("Nenhuma visita encontrada para os filtros selecionados.")
         return
 
-    # ⚠️ Alerta de visitas pendentes vencidas
+    # ✅ Conversão de string para datetime para comparação
     df["data_datetime"] = pd.to_datetime(df["data"], format="%d/%m/%Y")
-    pendentes_vencidas = df[(df["status"] == "Pendente") & (df["data_datetime"] < date.today())]
+    hoje = pd.Timestamp(date.today())
+
+    # ⚠️ Alerta de visitas pendentes vencidas
+    pendentes_vencidas = df[(df["status"] == "Pendente") & (df["data_datetime"] < hoje)]
     if not pendentes_vencidas.empty:
         st.warning(f"⚠️ Existem {len(pendentes_vencidas)} visita(s) pendente(s) com data anterior a hoje!")
 
-    # 🔽 Download em CSV
+    # 🔽 Download em CSV (sem coluna auxiliar)
     csv = df.drop(columns=["data_datetime"]).to_csv(index=False).encode("utf-8")
     st.download_button("📥 Baixar visitas (CSV)", data=csv, file_name="minhas_visitas.csv", mime="text/csv")
 
+    # Métricas rápidas
     st.metric("Total de visitas", len(df))
     st.metric("Concluídas", (df["status"] == "Concluída").sum())
 
@@ -223,7 +228,7 @@ def page_minhas_visitas_loja():
 
             st.markdown("---")  # separador entre visitas
 
-    # ❓ Botão de ajuda
+    # ❓ Ajuda
     with st.expander("❓ Precisa de ajuda?"):
         st.markdown("""
         Caso esteja com dúvidas ou problemas com a agenda de visitas, entre em contato com o setor de compras:
