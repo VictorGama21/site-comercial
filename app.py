@@ -171,18 +171,33 @@ def page_minhas_visitas_loja():
 
     status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
 
+    dias_semana = ["Todos"] + list(WEEKDAYS_PT.values())
+    dia_semana = st.selectbox("Filtrar por dia da semana", dias_semana)
+
     df = list_visits(store_id=user["store_id"], status=status, start=start, end=end)
+
+    if dia_semana != "Todos":
+        df = df[df["dia_semana"] == dia_semana]
 
     if df.empty:
         st.info("Nenhuma visita encontrada para os filtros selecionados.")
         return
+
+    # ⚠️ Alerta de visitas pendentes vencidas
+    df["data_datetime"] = pd.to_datetime(df["data"], format="%d/%m/%Y")
+    pendentes_vencidas = df[(df["status"] == "Pendente") & (df["data_datetime"] < date.today())]
+    if not pendentes_vencidas.empty:
+        st.warning(f"⚠️ Existem {len(pendentes_vencidas)} visita(s) pendente(s) com data anterior a hoje!")
+
+    # 🔽 Download em CSV
+    csv = df.drop(columns=["data_datetime"]).to_csv(index=False).encode("utf-8")
+    st.download_button("📥 Baixar visitas (CSV)", data=csv, file_name="minhas_visitas.csv", mime="text/csv")
 
     st.metric("Total de visitas", len(df))
     st.metric("Concluídas", (df["status"] == "Concluída").sum())
 
     st.subheader("📋 Lista de Visitas")
 
-    # Mostrar visitas em formato de cartão por linha
     for _, row in df.iterrows():
         with st.container():
             col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
@@ -198,7 +213,6 @@ def page_minhas_visitas_loja():
             col2.write(f"📌 **Status:** {row['status']}")
             col3.write(f"📝 **Info:** {row['info'] if row['info'] else '-'}")
 
-            # Botão de concluir
             if row["status"] == "Pendente":
                 if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
                     concluir_visit(row["id"], user["id"])
@@ -208,6 +222,15 @@ def page_minhas_visitas_loja():
                 st.write("✔️ **Já concluída**")
 
             st.markdown("---")  # separador entre visitas
+
+    # ❓ Botão de ajuda
+    with st.expander("❓ Precisa de ajuda?"):
+        st.markdown("""
+        Caso esteja com dúvidas ou problemas com a agenda de visitas, entre em contato com o setor de compras:
+
+        📧 **Email:** [compras1@quitandaria.com.br](mailto:compras1@quitandaria.com.br)
+        """)
+
 
 def get_suppliers():
     conn = get_conn()
