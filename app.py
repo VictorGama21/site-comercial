@@ -458,11 +458,17 @@ def page_dashboard_comercial():
     with col3:
         dia_semana = st.selectbox("Dia da semana", dias_semana)
 
+    # Calcula primeira e última data da semana atual
+    hoje = date.today()
+    inicio_semana = hoje - timedelta(days=hoje.weekday())  # Segunda-feira
+    fim_semana = inicio_semana + timedelta(days=6)          # Domingo
+    
     col4, col5 = st.columns(2)
     with col4:
-        start = st.date_input("Início", value=date.today() - timedelta(days=7), format="DD/MM/YYYY")
+        start = st.date_input("Início", value=inicio_semana, format="DD/MM/YYYY")
     with col5:
-        end = st.date_input("Fim", value=date.today() + timedelta(days=60), format="DD/MM/YYYY")
+        end = st.date_input("Fim", value=fim_semana, format="DD/MM/YYYY")
+
 
     df = list_visits(store_id=loja_id, status=status, start=start, end=end)
 
