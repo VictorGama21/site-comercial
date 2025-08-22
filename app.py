@@ -8,8 +8,12 @@ import unidecode
 import os
 from dotenv import load_dotenv
 import plotly.express as px
+import io
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 load_dotenv()
+
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://usuario:senha@host:porta/database")
 
@@ -154,6 +158,39 @@ def get_stores():
     conn.close()
     return df
     
+def export_visitas_excel(df):
+        # Cria Excel em memória
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.drop(columns=["data_datetime"]).to_excel(writer, index=False, sheet_name="Visitas")
+        
+        # Reabre o arquivo para aplicar cores
+        output.seek(0)
+        wb = load_workbook(output)
+        ws = wb.active
+    
+        # Identifica coluna de status
+        col_status = None
+        for idx, cell in enumerate(ws[1], start=1):
+            if cell.value == "status":
+                col_status = idx
+                break
+    
+        if col_status:
+            # Aplica cores linha por linha
+            for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_status, max_col=col_status):
+                for cell in row:
+                    if cell.value and str(cell.value).lower() == "concluída":
+                        cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # verde
+                    elif cell.value and str(cell.value).lower() == "pendente":
+                        cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # vermelho
+    
+        # Salva no buffer
+        final_output = io.BytesIO()
+        wb.save(final_output)
+    
+        return final_output.getvalue()
+        
 def page_minhas_visitas_loja():
     st.header("Minhas Visitas")
 
@@ -192,10 +229,17 @@ def page_minhas_visitas_loja():
     pendentes_vencidas = df[(df["status"] == "Pendente") & (df["data_datetime"] < hoje)]
     if not pendentes_vencidas.empty:
         st.warning(f"⚠️ Existem {len(pendentes_vencidas)} visita(s) pendente(s) com data anterior a hoje!")
+    
+    # 🔽 dentro da sua função page_minhas_visitas_loja():
+    excel_bytes = export_visitas_excel(df)
+    
+    st.download_button(
+        "📥 Baixar visitas (Excel)",
+        data=excel_bytes,
+        file_name="minhas_visitas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-    # 🔽 Download em CSV (sem coluna auxiliar)
-    csv = df.drop(columns=["data_datetime"]).to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Baixar visitas (CSV)", data=csv, file_name="minhas_visitas.csv", mime="text/csv")
 
     # Métricas rápidas
     st.metric("Total de visitas", len(df))
