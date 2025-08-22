@@ -211,12 +211,15 @@ def page_minhas_visitas_loja():
         st.warning("Usuário não associado a nenhuma loja.")
         return
 
-    # Filtro padrão: hoje → +7 dias
-    col1, col2 = st.columns(2)
-    with col1:
-        start = st.date_input("Início", value=date.today(), format="DD/MM/YYYY")
-    with col2:
-        end = st.date_input("Fim", value=date.today() + timedelta(days=7), format="DD/MM/YYYY")
+    # Filtro padrão: semana atual
+    hoje = date.today()
+    inicio_semana = hoje - timedelta(days=hoje.weekday())
+    fim_semana = inicio_semana + timedelta(days=6)
+    col4, col5 = st.columns(2)
+    with col4:
+        start = st.date_input("Início", value=inicio_semana, format="DD/MM/YYYY")
+    with col5:
+        end = st.date_input("Fim", value=fim_semana, format="DD/MM/YYYY")
 
     status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
     dias_semana = ["Todos"] + list(WEEKDAYS_PT.values())
