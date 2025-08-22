@@ -95,6 +95,18 @@ def concluir_visit(visit_id: int, user_id: int):
     """, (user_id, visit_id))
     conn.commit()
     conn.close()
+def reabrir_visit(visit_id: int, user_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Pendente',
+            completed_at = NULL,
+            completed_by = NULL
+        WHERE id = %s;
+    """, (visit_id,))
+    conn.commit()
+    conn.close()
 
 
 def seed_data():
@@ -207,13 +219,11 @@ def page_minhas_visitas_loja():
         end = st.date_input("Fim", value=date.today() + timedelta(days=7), format="DD/MM/YYYY")
 
     status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
-
     dias_semana = ["Todos"] + list(WEEKDAYS_PT.values())
     dia_semana = st.selectbox("Filtrar por dia da semana", dias_semana)
 
     df = list_visits(store_id=user["store_id"], status=status, start=start, end=end)
 
-    # Filtro por dia da semana
     if dia_semana != "Todos":
         df = df[df["dia_semana"] == dia_semana]
 
@@ -221,18 +231,14 @@ def page_minhas_visitas_loja():
         st.info("Nenhuma visita encontrada para os filtros selecionados.")
         return
 
-    # ✅ Conversão de string para datetime para comparação
     df["data_datetime"] = pd.to_datetime(df["data"], format="%d/%m/%Y")
-    hoje = pd.Timestamp(date.today())
+    hoje_ts = pd.Timestamp(date.today())
 
-    # ⚠️ Alerta de visitas pendentes vencidas
-    pendentes_vencidas = df[(df["status"] == "Pendente") & (df["data_datetime"] < hoje)]
+    pendentes_vencidas = df[(df["status"] == "Pendente") & (df["data_datetime"] < hoje_ts)]
     if not pendentes_vencidas.empty:
         st.warning(f"⚠️ Existem {len(pendentes_vencidas)} visita(s) pendente(s) com data anterior a hoje!")
-    
-    # 🔽 dentro da sua função page_minhas_visitas_loja():
+
     excel_bytes = export_visitas_excel(df)
-    
     st.download_button(
         "📥 Baixar visitas (Excel)",
         data=excel_bytes,
@@ -240,17 +246,13 @@ def page_minhas_visitas_loja():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-
-    # Métricas rápidas
     st.metric("Total de visitas", len(df))
     st.metric("Concluídas", (df["status"] == "Concluída").sum())
 
     st.subheader("📋 Lista de Visitas")
-
     for _, row in df.iterrows():
         with st.container():
             col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
-
             col1.write(f"📅 **Data:** {row['data']}")
             col2.write(f"📆 **Dia da semana:** {row['dia_semana']}")
             col3.write(f"👤 **Comprador:** {row['comprador']}")
@@ -269,10 +271,13 @@ def page_minhas_visitas_loja():
                     st.rerun()
             else:
                 st.write("✔️ **Já concluída**")
+                if st.button("🔄 Reabrir visita", key=f"reabrir_{row['id']}"):
+                    reabrir_visit(row["id"], user["id"])
+                    st.info(f"Visita {row['id']} reaberta e agora está Pendente.")
+                    st.rerun()
 
-            st.markdown("---")  # separador entre visitas
+            st.markdown("---")
 
-    # ❓ Ajuda
     with st.expander("❓ Precisa de ajuda?"):
         st.markdown("""
         Caso esteja com dúvidas ou problemas com a agenda de visitas, entre em contato com o setor de compras:
@@ -458,21 +463,17 @@ def page_dashboard_comercial():
     with col3:
         dia_semana = st.selectbox("Dia da semana", dias_semana)
 
-    # Calcula primeira e última data da semana atual
     hoje = date.today()
-    inicio_semana = hoje - timedelta(days=hoje.weekday())  # Segunda-feira
-    fim_semana = inicio_semana + timedelta(days=6)          # Domingo
-    
+    inicio_semana = hoje - timedelta(days=hoje.weekday())
+    fim_semana = inicio_semana + timedelta(days=6)
     col4, col5 = st.columns(2)
     with col4:
         start = st.date_input("Início", value=inicio_semana, format="DD/MM/YYYY")
     with col5:
         end = st.date_input("Fim", value=fim_semana, format="DD/MM/YYYY")
 
-
     df = list_visits(store_id=loja_id, status=status, start=start, end=end)
 
-    # Filtro adicional por dia da semana
     if dia_semana != "Todos":
         df = df[df["dia_semana"] == dia_semana]
 
@@ -484,7 +485,6 @@ def page_dashboard_comercial():
     st.metric("Total de visitas", len(df))
     st.metric("Concluídas", (df["status"] == "Concluída").sum())
 
-    # Dashboard analítico
     st.subheader("📊 Dashboard Analítico")
     col1, col2 = st.columns(2)
     with col1:
@@ -497,8 +497,7 @@ def page_dashboard_comercial():
     fig3 = px.line(df, x="data", color="status", title="Evolução das Visitas")
     st.plotly_chart(fig3, use_container_width=True)
 
-    # --- Editar e Excluir ---
-    st.subheader("Editar/Excluir Visitas")
+    st.subheader("Editar/Excluir/Reabrir Visitas")
     visit_id = st.selectbox("Selecione uma visita", df["id"].tolist())
     if visit_id:
         vrow = df[df["id"] == visit_id].iloc[0]
@@ -508,7 +507,7 @@ def page_dashboard_comercial():
         garantia = st.selectbox("Garantia", ["", "Sim", "Não", "A confirmar"], index=["", "Sim", "Não", "A confirmar"].index(vrow["garantia"]) if vrow["garantia"] in ["", "Sim", "Não", "A confirmar"] else 0)
         info = st.text_area("Informações", vrow["info"])
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Salvar alterações"):
                 update_visit(visit_id, comprador, fornecedor, segmento, garantia, info)
@@ -519,6 +518,12 @@ def page_dashboard_comercial():
                 delete_visit(visit_id)
                 st.warning("Visita excluída!")
                 st.rerun()
+        with col3:
+            if vrow["status"] == "Concluída":
+                if st.button("🔄 Reabrir visita"):
+                    reabrir_visit(visit_id, st.session_state.user["id"])
+                    st.info("Visita reaberta e agora está Pendente.")
+                    st.rerun()
 
 def login_form():
     st.title("Login - Sistema de Visitas")
