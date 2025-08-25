@@ -366,8 +366,12 @@ def list_visits(store_id=None, status=None, start=None, end=None):
         q.append("AND v.store_id = %s")
         params.append(store_id)
     if status:
-        q.append("AND v.status = %s")
-        params.append(status)
+        if len(status) == 1:
+            q.append("AND v.status = %s")
+            params.append(status[0])
+        else:
+            q.append("AND v.status = ANY(%s)")
+            params.append(status)
     if start:
         q.append("AND v.visit_date >= %s")
         params.append(start)
@@ -386,6 +390,7 @@ def list_visits(store_id=None, status=None, start=None, end=None):
         "segmento", "garantia", "info", "status", "manager_comment"
     ]
     return pd.DataFrame(rows, columns=cols)
+
 
 
 def update_visit(visit_id: int, buyer: str, supplier: str, segment: str, warranty: str, info: str):
@@ -601,15 +606,24 @@ def footer():
     st.markdown(
         """
         ---
-        <div style='text-align: center; font-size: 12px; color: gray;'>
+        <div style='text-align: center; font-size: 12px; color: gray; line-height: 1.6;'>
+            📱 <b>Sistema de Visitas - Quitandaria</b><br>
             © 2025 Victor Manuel Gama dos Anjos – Todos os direitos reservados<br>
-            📞 5581992042186
+            🚀 Este aplicativo foi desenvolvido para facilitar a gestão de visitas comerciais e o acompanhamento de fornecedores.<br><br>
+
+            <i>Fotos ilustrativas. As visitas e informações cadastradas podem ser alteradas ou canceladas em caso de inconsistências.</i><br>
+            O sistema está sujeito a ajustes e melhorias contínuas.<br><br>
+
+            🔒 <b>Segurança:</b> Todas as informações inseridas são armazenadas de forma protegida.<br>
+            📦 <b>Disponibilidade:</b> O agendamento está sujeito à confirmação e disponibilidade.<br><br>
+
+            2025 © Quitandaria App - Todos os Direitos Reservados<br>
+            Bairro Novo, Avenida Presidente Getúlio Vargas, 761, Olinda - PE
         </div>
         """,
         unsafe_allow_html=True
     )
 
-def main():
     st.set_page_config(page_title="Sistema de Visitas", layout="wide")
     st.markdown("""
         <style>
