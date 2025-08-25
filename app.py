@@ -80,8 +80,29 @@ def init_db():
         );
     """)
 
+    # 🔹 Garante que a coluna manager_comment existe
+    cur.execute("ALTER TABLE visits ADD COLUMN IF NOT EXISTS manager_comment TEXT;")
+
     conn.commit()
     conn.close()
+q = [
+    "SELECT v.id, s.name AS loja, v.visit_date AS data, v.weekday AS dia_semana,",
+    "v.buyer AS comprador, sp.name AS fornecedor, v.segment AS segmento,",
+    "v.warranty AS garantia, v.info AS info, v.status, v.manager_comment",
+    "FROM visits v JOIN stores s ON s.id = v.store_id JOIN suppliers sp ON sp.id = v.supplier_id WHERE 1=1"
+]
+
+def update_manager_comment(visit_id: int, comment: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET manager_comment = %s
+        WHERE id = %s;
+    """, (comment, visit_id))
+    conn.commit()
+    conn.close()
+
     
 def concluir_visit(visit_id: int, user_id: int):
     conn = get_conn()
@@ -266,6 +287,10 @@ def page_minhas_visitas_loja():
             col1.write(f"🛡 **Garantia:** {row['garantia']}")
             col2.write(f"📌 **Status:** {row['status']}")
             col3.write(f"📝 **Info:** {row['info'] if row['info'] else '-'}")
+            
+            if row.get("manager_comment"):
+                st.info(f"💬 **Comentário do Gerente:** {row['manager_comment']}")
+
 
             if row["status"] == "Pendente":
                 if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
@@ -506,14 +531,18 @@ def page_dashboard_comercial():
         vrow = df[df["id"] == visit_id].iloc[0]
         comprador = st.text_input("Comprador", vrow["comprador"])
         fornecedor = st.text_input("Fornecedor", vrow["fornecedor"])
-        segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS, index=SEGMENTOS_FIXOS.index(vrow["segmento"]) if vrow["segmento"] in SEGMENTOS_FIXOS else 0)
-        garantia = st.selectbox("Garantia", ["", "Sim", "Não", "A confirmar"], index=["", "Sim", "Não", "A confirmar"].index(vrow["garantia"]) if vrow["garantia"] in ["", "Sim", "Não", "A confirmar"] else 0)
+        segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS,
+                                index=SEGMENTOS_FIXOS.index(vrow["segmento"]) if vrow["segmento"] in SEGMENTOS_FIXOS else 0)
+        garantia = st.selectbox("Garantia", ["", "Sim", "Não", "A confirmar"],
+                                index=["", "Sim", "Não", "A confirmar"].index(vrow["garantia"]) if vrow["garantia"] in ["", "Sim", "Não", "A confirmar"] else 0)
         info = st.text_area("Informações", vrow["info"])
-
-        col1, col2, col3 = st.columns(3)
+        manager_comment = st.text_area("📝 Observação do Gerente", vrow["manager_comment"] if vrow["manager_comment"] else "")
+    
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             if st.button("Salvar alterações"):
                 update_visit(visit_id, comprador, fornecedor, segmento, garantia, info)
+                update_manager_comment(visit_id, manager_comment)
                 st.success("Visita atualizada!")
                 st.rerun()
         with col2:
@@ -527,6 +556,7 @@ def page_dashboard_comercial():
                     reabrir_visit(visit_id, st.session_state.user["id"])
                     st.info("Visita reaberta e agora está Pendente.")
                     st.rerun()
+
 
 def login_form():
     st.title("Login - Sistema de Visitas")
