@@ -116,6 +116,7 @@ def concluir_visit(visit_id: int, user_id: int):
     """, (user_id, visit_id))
     conn.commit()
     conn.close()
+    
 def reabrir_visit(visit_id: int, user_id: int):
     conn = get_conn()
     cur = conn.cursor()
@@ -350,10 +351,13 @@ def create_visit(store_ids, visit_date: date, buyer: str, supplier: str, segment
     conn.close()
 
 def list_visits(store_id=None, status=None, start=None, end=None):
+    conn = get_conn()
+    cur = conn.cursor()
+
     q = [
         "SELECT v.id, s.name AS loja, v.visit_date AS data, v.weekday AS dia_semana,",
         "v.buyer AS comprador, sp.name AS fornecedor, v.segment AS segmento,",
-        "v.warranty AS garantia, v.info AS info, v.status",
+        "v.warranty AS garantia, v.info AS info, v.status, v.manager_comment",
         "FROM visits v JOIN stores s ON s.id = v.store_id JOIN suppliers sp ON sp.id = v.supplier_id WHERE 1=1"
     ]
     params = []
@@ -362,9 +366,8 @@ def list_visits(store_id=None, status=None, start=None, end=None):
         q.append("AND v.store_id = %s")
         params.append(store_id)
     if status:
-        placeholders = ",".join(["%s"] * len(status))
-        q.append(f"AND v.status IN ({placeholders})")
-        params.extend(status)
+        q.append("AND v.status = %s")
+        params.append(status)
     if start:
         q.append("AND v.visit_date >= %s")
         params.append(start)
@@ -372,15 +375,18 @@ def list_visits(store_id=None, status=None, start=None, end=None):
         q.append("AND v.visit_date <= %s")
         params.append(end)
 
-    q.append("ORDER BY v.visit_date ASC, v.id ASC")
-
-    conn = get_conn()
-    df = pd.read_sql_query("\n".join(q), conn, params=params)
+    q.append("ORDER BY v.visit_date DESC")
+    cur.execute(" ".join(q), tuple(params))
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
 
-    if not df.empty:
-        df["data"] = pd.to_datetime(df["data"]).dt.strftime("%d/%m/%Y")
-    return df
+    cols = [
+        "id", "loja", "data", "dia_semana", "comprador", "fornecedor",
+        "segmento", "garantia", "info", "status", "manager_comment"
+    ]
+    return pd.DataFrame(rows, columns=cols)
+
 
 def update_visit(visit_id: int, buyer: str, supplier: str, segment: str, warranty: str, info: str):
     supplier_id = ensure_supplier(supplier)
@@ -588,6 +594,17 @@ def logout_button():
     if st.sidebar.button("Sair"):
         st.session_state.user = None
         st.rerun()
+def footer():
+    st.markdown(
+        """
+        ---
+        <div style='text-align: center; font-size: 12px; color: gray;'>
+            © 2025 Victor Manuel Gama dos Anjos – Todos os direitos reservados<br>
+            📞 5581992042186
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 # -----------------------------
@@ -608,9 +625,10 @@ def main():
     st.sidebar.title("📅 Sistema de Visitas - Quitandaria")
     if "user" not in st.session_state:
         st.session_state.user = None
-
+        
     if st.session_state.user is None:
         login_form()
+         footer()  # <<< adiciona aqui
         return
 
     user = st.session_state.user
@@ -622,8 +640,10 @@ def main():
         logout_button()
         if page == "Agenda Geral":
             page_dashboard_comercial()
+            footer()  # <<< adiciona aqui
         else:
             page_agendar_visita()
+            footer()  # <<< adiciona aqui
     elif user["role"] == "loja":
         st.sidebar.radio("Navegação", ["Minhas Visitas"])
         logout_button()
