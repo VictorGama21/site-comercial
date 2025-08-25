@@ -594,6 +594,9 @@ def logout_button():
     if st.sidebar.button("Sair"):
         st.session_state.user = None
         st.rerun()
+# -----------------------------
+# App principal
+# -----------------------------
 def footer():
     st.markdown(
         """
@@ -606,10 +609,6 @@ def footer():
         unsafe_allow_html=True
     )
 
-
-# -----------------------------
-# App principal
-# -----------------------------
 def main():
     st.set_page_config(page_title="Sistema de Visitas", layout="wide")
     st.markdown("""
@@ -625,12 +624,14 @@ def main():
     st.sidebar.title("📅 Sistema de Visitas - Quitandaria")
     if "user" not in st.session_state:
         st.session_state.user = None
-        
+
+    # --- Login/Register ---
     if st.session_state.user is None:
         login_form()
-         footer()  # <<< adiciona aqui
+        footer()  # <<< agora indentado corretamente
         return
 
+    # --- Usuário autenticado ---
     user = st.session_state.user
     st.sidebar.write(f"**Usuário:** {user['name']}")
     st.sidebar.write(f"**Perfil:** {user['role'].capitalize()}")
@@ -640,14 +641,15 @@ def main():
         logout_button()
         if page == "Agenda Geral":
             page_dashboard_comercial()
-            footer()  # <<< adiciona aqui
         else:
             page_agendar_visita()
-            footer()  # <<< adiciona aqui
+        footer()  # <<< mostra em qualquer página comercial
     elif user["role"] == "loja":
         st.sidebar.radio("Navegação", ["Minhas Visitas"])
         logout_button()
         page_minhas_visitas_loja()
+        footer()  # <<< mostra também na loja
 
 if __name__ == "__main__":
     main()
+
