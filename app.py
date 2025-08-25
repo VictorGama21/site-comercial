@@ -104,18 +104,20 @@ def update_manager_comment(visit_id: int, comment: str):
     conn.close()
 
     
-def concluir_visit(visit_id: int, user_id: int):
+def concluir_visit(visit_id: int, user_id: int, manager_comment: str = None):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
         UPDATE visits
         SET status = 'Concluída',
             completed_at = CURRENT_TIMESTAMP,
-            completed_by = %s
+            completed_by = %s,
+            manager_comment = %s
         WHERE id = %s;
-    """, (user_id, visit_id))
+    """, (user_id, manager_comment, visit_id))
     conn.commit()
     conn.close()
+
     
 def reabrir_visit(visit_id: int, user_id: int):
     conn = get_conn()
@@ -536,7 +538,7 @@ def page_dashboard_comercial():
     fig3 = px.line(df, x="data", color="status", title="Evolução das Visitas")
     st.plotly_chart(fig3, use_container_width=True)
 
-    st.subheader("Editar/Excluir/Reabrir Visitas")
+    st.subheader("✏️ Gerenciar Visitas")
     visit_id = st.selectbox("Selecione uma visita", df["id"].tolist())
     if visit_id:
         vrow = df[df["id"] == visit_id].iloc[0]
@@ -547,13 +549,11 @@ def page_dashboard_comercial():
         garantia = st.selectbox("Garantia", ["", "Sim", "Não", "A confirmar"],
                                 index=["", "Sim", "Não", "A confirmar"].index(vrow["garantia"]) if vrow["garantia"] in ["", "Sim", "Não", "A confirmar"] else 0)
         info = st.text_area("Informações", vrow["info"])
-        manager_comment = st.text_area("📝 Observação do Gerente", vrow["manager_comment"] if vrow["manager_comment"] else "")
-    
+
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             if st.button("Salvar alterações"):
                 update_visit(visit_id, comprador, fornecedor, segmento, garantia, info)
-                update_manager_comment(visit_id, manager_comment)
                 st.success("Visita atualizada!")
                 st.rerun()
         with col2:
@@ -567,6 +567,16 @@ def page_dashboard_comercial():
                     reabrir_visit(visit_id, st.session_state.user["id"])
                     st.info("Visita reaberta e agora está Pendente.")
                     st.rerun()
+        with col4:
+            if vrow["status"] == "Pendente":
+                comentario = st.text_area("💬 Comentário do Gerente (obrigatório para concluir)", key=f"comentario_{visit_id}")
+                if st.button("✅ Concluir visita", key=f"concluir_{visit_id}"):
+                    if not comentario.strip():
+                        st.warning("⚠️ Adicione um comentário antes de concluir a visita.")
+                    else:
+                        concluir_visit(visit_id, st.session_state.user["id"], comentario)
+                        st.success("Visita concluída com comentário do gerente!")
+                        st.rerun()
 
 
 def login_form():
@@ -605,24 +615,38 @@ def logout_button():
 def footer():
     st.markdown(
         """
-        ---
-        <div style='text-align: center; font-size: 12px; color: gray; line-height: 1.6;'>
-            📱 <b>Sistema de Visitas - Quitandaria</b><br>
-            © 2025 Victor Manuel Gama dos Anjos – Todos os direitos reservados<br>
-            🚀 Este aplicativo foi desenvolvido para facilitar a gestão de visitas comerciais e o acompanhamento de fornecedores.<br><br>
+        <hr style="margin-top: 40px; margin-bottom: 20px;">
 
-            <i>Fotos ilustrativas. As visitas e informações cadastradas podem ser alteradas ou canceladas em caso de inconsistências.</i><br>
-            O sistema está sujeito a ajustes e melhorias contínuas.<br><br>
+        <div style='text-align: center; font-size: 12px; color: #666; line-height: 1.6; max-width: 800px; margin: auto;'>
 
-            🔒 <b>Segurança:</b> Todas as informações inseridas são armazenadas de forma protegida.<br>
-            📦 <b>Disponibilidade:</b> O agendamento está sujeito à confirmação e disponibilidade.<br><br>
+            <p style="font-size: 13px;">
+                📱 <b>Sistema de Visitas - Quitandaria</b><br>
+                © 2025 Victor Manuel Gama dos Anjos – Todos os direitos reservados
+            </p>
 
-            2025 © Quitandaria App - Todos os Direitos Reservados<br>
-            Bairro Novo, Avenida Presidente Getúlio Vargas, 761, Olinda - PE
+            <p style="font-size: 12px; color: #777;">
+                🚀 Este aplicativo foi desenvolvido para facilitar a gestão de visitas comerciais e o acompanhamento de fornecedores.
+            </p>
+
+            <p style="font-size: 11px; color: #888;">
+                <i>Fotos ilustrativas. As visitas e informações cadastradas podem ser alteradas ou canceladas em caso de inconsistências.<br>
+                O sistema está sujeito a ajustes e melhorias contínuas.</i>
+            </p>
+
+            <p style="font-size: 12px; color: #555;">
+                🔒 <b>Segurança:</b> Informações armazenadas de forma protegida.<br>
+                📦 <b>Disponibilidade:</b> O agendamento depende de confirmação e disponibilidade.
+            </p>
+
+            <p style="font-size: 11px; color: #777; margin-top: 15px;">
+                2025 © Quitandaria App - Todos os Direitos Reservados<br>
+                Bairro Novo, Avenida Presidente Getúlio Vargas, 761, Olinda - PE
+            </p>
         </div>
         """,
         unsafe_allow_html=True
     )
+
 
 
 # -----------------------------
