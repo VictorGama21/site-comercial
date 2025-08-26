@@ -294,10 +294,11 @@ def page_minhas_visitas_loja():
             if row.get("manager_comment"):
                 st.info(f"💬 **Comentário do Gerente:** {row['manager_comment']}")
 
-
+            # Botões de ação
             if row["status"] == "Pendente":
+                comentario = st.text_area("💬 Comentário do Gerente (opcional)", key=f"comentario_{row['id']}")
                 if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
-                    concluir_visit(row["id"], user["id"])
+                    concluir_visit(row["id"], user["id"], comentario if comentario.strip() else None)
                     st.success(f"Visita {row['id']} concluída com sucesso!")
                     st.rerun()
             else:
@@ -569,14 +570,12 @@ def page_dashboard_comercial():
                     st.rerun()
         with col4:
             if vrow["status"] == "Pendente":
-                comentario = st.text_area("💬 Comentário do Gerente (obrigatório para concluir)", key=f"comentario_{visit_id}")
+                comentario = st.text_area("💬 Comentário do Gerente (opcional)", key=f"comentario_{visit_id}")
                 if st.button("✅ Concluir visita", key=f"concluir_{visit_id}"):
-                    if not comentario.strip():
-                        st.warning("⚠️ Adicione um comentário antes de concluir a visita.")
-                    else:
-                        concluir_visit(visit_id, st.session_state.user["id"], comentario)
-                        st.success("Visita concluída com comentário do gerente!")
-                        st.rerun()
+                    concluir_visit(visit_id, st.session_state.user["id"], comentario if comentario.strip() else None)
+                    st.success("Visita concluída!")
+                    st.rerun()
+
 
 
 def login_form():
@@ -615,37 +614,20 @@ def logout_button():
 def footer():
     st.markdown(
         """
-        <hr style="margin-top: 40px; margin-bottom: 20px;">
+        ---
+        <div style='text-align: center; font-size: 12px; color: gray; line-height: 1.6;'>
+            📱 <b>Sistema de Visitas - Quitandaria</b><br>
+            © 2025 Victor Manuel Gama dos Anjos – Todos os direitos reservados<br><br>
 
-        <div style='text-align: center; font-size: 12px; color: #666; line-height: 1.6; max-width: 800px; margin: auto;'>
+            🚀 Desenvolvido para facilitar a gestão de visitas e fornecedores.<br>
+            🔒 Informações protegidas · 📦 Sujeito à disponibilidade<br><br>
 
-            <p style="font-size: 13px;">
-                📱 <b>Sistema de Visitas - Quitandaria</b><br>
-                © 2025 Victor Manuel Gama dos Anjos – Todos os direitos reservados
-            </p>
-
-            <p style="font-size: 12px; color: #777;">
-                🚀 Este aplicativo foi desenvolvido para facilitar a gestão de visitas comerciais e o acompanhamento de fornecedores.
-            </p>
-
-            <p style="font-size: 11px; color: #888;">
-                <i>Fotos ilustrativas. As visitas e informações cadastradas podem ser alteradas ou canceladas em caso de inconsistências.<br>
-                O sistema está sujeito a ajustes e melhorias contínuas.</i>
-            </p>
-
-            <p style="font-size: 12px; color: #555;">
-                🔒 <b>Segurança:</b> Informações armazenadas de forma protegida.<br>
-                📦 <b>Disponibilidade:</b> O agendamento depende de confirmação e disponibilidade.
-            </p>
-
-            <p style="font-size: 11px; color: #777; margin-top: 15px;">
-                2025 © Quitandaria App - Todos os Direitos Reservados<br>
-                Bairro Novo, Avenida Presidente Getúlio Vargas, 761, Olinda - PE
-            </p>
+            Bairro Novo – Av. Presidente Getúlio Vargas, 761, Olinda - PE
         </div>
         """,
         unsafe_allow_html=True
     )
+
 
 
 
