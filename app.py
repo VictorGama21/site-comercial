@@ -618,8 +618,7 @@ def footer():
         <div style='text-align: center; font-size: 12px; color: gray; line-height: 1.6;'>
             📱 <b>Sistema de Visitas - Quitandaria</b><br>
             © 2025 Victor Manuel Gama dos Anjos – Todos os direitos reservados<br><br>
-
-            🚀 Desenvolvido para facilitar a gestão de visitas e fornecedores.<br>
+            🚀 <br>Desenvolvido para facilitar a gestão de visitas e fornecedores.<br><br>
             🔒 Informações protegidas · 📦 Sujeito à disponibilidade<br><br>
 
             Bairro Novo – Av. Presidente Getúlio Vargas, 761, Olinda - PE
