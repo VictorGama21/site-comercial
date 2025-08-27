@@ -307,11 +307,11 @@ def page_minhas_visitas_loja():
             
             if row.get("manager_comment"):
                 st.info(f"💬 **Comentário do Gerente:** {row['manager_comment']}")
-
+                
             # Botões de ação
             if row["status"] == "Pendente":
                 comentario = st.text_area("💬 Observação (opcional)", key=f"comentario_{row['id']}")
-            
+                
                 colA, colB = st.columns(2)
                 with colA:
                     if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
@@ -321,20 +321,20 @@ def page_minhas_visitas_loja():
                 with colB:
                     if st.button("❌ Fornecedor não foi", key=f"nao_compareceu_{row['id']}"):
                         nao_compareceu_visit(row["id"], user["id"], comentario if comentario.strip() else None)
-                        st.warning(f"Visita {row['id']} marcada como 'Fornecedor não foi'.")
+                        st.warning(f"Visita {row['id']} marcada como 'Não Compareceu'.")
                         st.rerun()
-            else:
+            
+            elif row["status"] in ["Concluída", "Não Compareceu"]:
                 if row["status"] == "Concluída":
                     st.write("✔️ **Visita concluída**")
                 elif row["status"] == "Não Compareceu":
                     st.write("⚠️ **Promotor não compareceu**")
-                else:
-                    st.write("⏳ **Visita pendente**")
+                # Apenas botão de reabrir
                 if st.button("🔄 Reabrir visita", key=f"reabrir_{row['id']}"):
                     reabrir_visit(row["id"], user["id"])
                     st.info(f"Visita {row['id']} reaberta e agora está Pendente.")
                     st.rerun()
-
+                    
             st.markdown("---")
 
     with st.expander("❓ Precisa de ajuda?"):
