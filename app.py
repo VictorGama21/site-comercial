@@ -233,7 +233,8 @@ def export_visitas_excel(df):
                         cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # verde
                     elif cell.value and str(cell.value).lower() == "pendente":
                         cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # vermelho
-    
+                    elif cell.value and str(cell.value).lower() == "não compareceu":
+                        cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")  # amarelo
         # Salva no buffer
         final_output = io.BytesIO()
         wb.save(final_output)
@@ -323,7 +324,12 @@ def page_minhas_visitas_loja():
                         st.warning(f"Visita {row['id']} marcada como 'Fornecedor não foi'.")
                         st.rerun()
             else:
-                st.write("✔️ **Já concluída**")
+                if row["status"] == "Concluída":
+                    st.write("✔️ **Visita concluída**")
+                elif row["status"] == "Não Compareceu":
+                    st.write("⚠️ **Promotor não compareceu**")
+                else:
+                    st.write("⏳ **Visita pendente**")
                 if st.button("🔄 Reabrir visita", key=f"reabrir_{row['id']}"):
                     reabrir_visit(row["id"], user["id"])
                     st.info(f"Visita {row['id']} reaberta e agora está Pendente.")
@@ -439,13 +445,14 @@ def delete_visit(visit_id: int):
 # -----------------------------
 # UI Helpers
 # -----------------------------
-def style_table(df):
-    def highlight_status(val):
-        if val == "Concluída":
-            return "background-color: #90EE90; color: black;"
-        elif val == "Pendente":
-            return "background-color: #FF7F7F; color: black;"
-        return ""
+def highlight_status(val):
+    if val == "Concluída":
+        return "background-color: #90EE90; color: black;"   # verde
+    elif val == "Pendente":
+        return "background-color: #FF7F7F; color: black;"   # vermelho
+    elif val == "Não Compareceu":
+        return "background-color: #FFD966; color: black;"   # amarelo
+    return ""
     return df.style.applymap(highlight_status, subset=["status"])
 
 # -----------------------------
@@ -522,7 +529,7 @@ def page_dashboard_comercial():
         loja_nome = st.selectbox("Loja", stores_filter)
         loja_id = None if loja_nome == "Todas" else int(stores.loc[stores["name"] == loja_nome, "id"].iloc[0])
     with col2:
-        status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
+        status = st.multiselect("Status", ["Pendente", "Concluída", "Não Compareceu"], default=["Pendente", "Concluída", "Não Compareceu"])
     with col3:
         dia_semana = st.selectbox("Dia da semana", dias_semana)
 
