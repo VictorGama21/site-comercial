@@ -103,6 +103,19 @@ def update_manager_comment(visit_id: int, comment: str):
     conn.commit()
     conn.close()
 
+def nao_compareceu_visit(visit_id: int, user_id: int, manager_comment: str = None):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Não Compareceu',
+            completed_at = CURRENT_TIMESTAMP,
+            completed_by = %s,
+            manager_comment = %s
+        WHERE id = %s;
+    """, (user_id, manager_comment, visit_id))
+    conn.commit()
+    conn.close()
     
 def concluir_visit(visit_id: int, user_id: int, manager_comment: str = None):
     conn = get_conn()
@@ -296,11 +309,19 @@ def page_minhas_visitas_loja():
 
             # Botões de ação
             if row["status"] == "Pendente":
-                comentario = st.text_area("💬 Comentário do Gerente (opcional)", key=f"comentario_{row['id']}")
-                if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
-                    concluir_visit(row["id"], user["id"], comentario if comentario.strip() else None)
-                    st.success(f"Visita {row['id']} concluída com sucesso!")
-                    st.rerun()
+                comentario = st.text_area("💬 Observação (opcional)", key=f"comentario_{row['id']}")
+            
+                colA, colB = st.columns(2)
+                with colA:
+                    if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
+                        concluir_visit(row["id"], user["id"], comentario if comentario.strip() else None)
+                        st.success(f"Visita {row['id']} concluída com sucesso!")
+                        st.rerun()
+                with colB:
+                    if st.button("❌ Fornecedor não foi", key=f"nao_compareceu_{row['id']}"):
+                        nao_compareceu_visit(row["id"], user["id"], comentario if comentario.strip() else None)
+                        st.warning(f"Visita {row['id']} marcada como 'Fornecedor não foi'.")
+                        st.rerun()
             else:
                 st.write("✔️ **Já concluída**")
                 if st.button("🔄 Reabrir visita", key=f"reabrir_{row['id']}"):
