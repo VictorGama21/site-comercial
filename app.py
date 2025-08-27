@@ -453,7 +453,10 @@ def highlight_status(val):
     elif val == "Não Compareceu":
         return "background-color: #FFD966; color: black;"   # amarelo
     return ""
+    
+def style_table(df: pd.DataFrame):
     return df.style.applymap(highlight_status, subset=["status"])
+
 
 # -----------------------------
 # Páginas
