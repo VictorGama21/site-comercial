@@ -259,7 +259,13 @@ def page_minhas_visitas_loja():
     with col5:
         end = st.date_input("Fim", value=fim_semana, format="DD/MM/YYYY")
 
-    status = st.multiselect("Status", ["Pendente", "Concluída"], default=["Pendente", "Concluída"])
+    # ✅ Adicionado "Não Compareceu" ao filtro
+    status = st.multiselect(
+        "Status",
+        ["Pendente", "Concluída", "Não Compareceu"],
+        default=["Pendente", "Concluída", "Não Compareceu"]
+    )
+
     dias_semana = ["Todos"] + list(WEEKDAYS_PT.values())
     dia_semana = st.selectbox("Filtrar por dia da semana", dias_semana)
 
@@ -289,6 +295,7 @@ def page_minhas_visitas_loja():
 
     st.metric("Total de visitas", len(df))
     st.metric("Concluídas", (df["status"] == "Concluída").sum())
+    st.metric("Não Compareceu", (df["status"] == "Não Compareceu").sum())
 
     st.subheader("📋 Lista de Visitas")
     for _, row in df.iterrows():
@@ -343,6 +350,7 @@ def page_minhas_visitas_loja():
 
         📧 **Email:** [compras1@quitandaria.com.br](mailto:compras1@quitandaria.com.br)
         """)
+
 
 
 def get_suppliers():
