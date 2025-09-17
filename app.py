@@ -14,7 +14,6 @@ from openpyxl.styles import PatternFill
 
 load_dotenv()
 
-
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://usuario:senha@host:porta/database")
 
 # -----------------------------
@@ -72,25 +71,17 @@ def init_db():
             segment TEXT,
             warranty TEXT,
             info TEXT,
-            status TEXT NOT NULL DEFAULT 'Pendente' CHECK(status IN ('Pendente','Concluída')),
+            status TEXT NOT NULL DEFAULT 'Pendente' CHECK(status IN ('Pendente','Concluída','Não Compareceu')),
             created_by INTEGER REFERENCES users(id),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP,
-            completed_by INTEGER REFERENCES users(id)
+            completed_by INTEGER REFERENCES users(id),
+            manager_comment TEXT
         );
     """)
 
-    # 🔹 Garante que a coluna manager_comment existe
-    cur.execute("ALTER TABLE visits ADD COLUMN IF NOT EXISTS manager_comment TEXT;")
-
     conn.commit()
     conn.close()
-q = [
-    "SELECT v.id, s.name AS loja, v.visit_date AS data, v.weekday AS dia_semana,",
-    "v.buyer AS comprador, sp.name AS fornecedor, v.segment AS segmento,",
-    "v.warranty AS garantia, v.info AS info, v.status, v.manager_comment",
-    "FROM visits v JOIN stores s ON s.id = v.store_id JOIN suppliers sp ON sp.id = v.supplier_id WHERE 1=1"
-]
 
 def update_manager_comment(visit_id: int, comment: str):
     conn = get_conn()
@@ -116,7 +107,7 @@ def nao_compareceu_visit(visit_id: int, user_id: int, manager_comment: str = Non
     """, (user_id, manager_comment, visit_id))
     conn.commit()
     conn.close()
-    
+
 def concluir_visit(visit_id: int, user_id: int, manager_comment: str = None):
     conn = get_conn()
     cur = conn.cursor()
@@ -131,7 +122,6 @@ def concluir_visit(visit_id: int, user_id: int, manager_comment: str = None):
     conn.commit()
     conn.close()
 
-    
 def reabrir_visit(visit_id: int, user_id: int):
     conn = get_conn()
     cur = conn.cursor()
@@ -144,7 +134,6 @@ def reabrir_visit(visit_id: int, user_id: int):
     """, (visit_id,))
     conn.commit()
     conn.close()
-
 
 def seed_data():
     conn = get_conn()
@@ -206,41 +195,44 @@ def get_stores():
     df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
     conn.close()
     return df
-    
+
 def export_visitas_excel(df):
-        # Cria Excel em memória
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.drop(columns=["data_datetime"]).to_excel(writer, index=False, sheet_name="Visitas")
-        
-        # Reabre o arquivo para aplicar cores
-        output.seek(0)
-        wb = load_workbook(output)
-        ws = wb.active
-    
-        # Identifica coluna de status
-        col_status = None
-        for idx, cell in enumerate(ws[1], start=1):
-            if cell.value == "status":
-                col_status = idx
-                break
-    
-        if col_status:
-            # Aplica cores linha por linha
-            for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_status, max_col=col_status):
-                for cell in row:
-                    if cell.value and str(cell.value).lower() == "concluída":
-                        cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # verde
-                    elif cell.value and str(cell.value).lower() == "pendente":
-                        cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # vermelho
-                    elif cell.value and str(cell.value).lower() == "não compareceu":
-                        cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")  # amarelo
-        # Salva no buffer
-        final_output = io.BytesIO()
-        wb.save(final_output)
-    
-        return final_output.getvalue()
-        
+    # Cria Excel em memória
+    output = io.BytesIO()
+    safe_df = df.copy()
+    if "data_datetime" in safe_df.columns:
+        safe_df = safe_df.drop(columns=["data_datetime"])
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        safe_df.to_excel(writer, index=False, sheet_name="Visitas")
+
+    # Reabre o arquivo para aplicar cores
+    output.seek(0)
+    wb = load_workbook(output)
+    ws = wb.active
+
+    # Identifica coluna de status
+    col_status = None
+    for idx, cell in enumerate(ws[1], start=1):
+        if cell.value == "status":
+            col_status = idx
+            break
+
+    if col_status:
+        # Aplica cores linha por linha
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_status, max_col=col_status):
+            for cell in row:
+                if cell.value and str(cell.value).lower() == "concluída":
+                    cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # verde
+                elif cell.value and str(cell.value).lower() == "pendente":
+                    cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # vermelho
+                elif cell.value and str(cell.value).lower() == "não compareceu":
+                    cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")  # amarelo
+
+    # Salva no buffer final
+    final_output = io.BytesIO()
+    wb.save(final_output)
+    return final_output.getvalue()
+
 def page_minhas_visitas_loja():
     st.header("Minhas Visitas")
 
@@ -259,7 +251,6 @@ def page_minhas_visitas_loja():
     with col5:
         end = st.date_input("Fim", value=fim_semana, format="DD/MM/YYYY")
 
-    # ✅ Adicionado "Não Compareceu" ao filtro
     status = st.multiselect(
         "Status",
         ["Pendente", "Concluída", "Não Compareceu"],
@@ -311,14 +302,12 @@ def page_minhas_visitas_loja():
             col1.write(f"🛡 **Garantia:** {row['garantia']}")
             col2.write(f"📌 **Status:** {row['status']}")
             col3.write(f"📝 **Info:** {row['info'] if row['info'] else '-'}")
-            
+
             if row.get("manager_comment"):
                 st.info(f"💬 **Comentário do Gerente:** {row['manager_comment']}")
-                
-            # Botões de ação
+
             if row["status"] == "Pendente":
                 comentario = st.text_area("💬 Observação (opcional)", key=f"comentario_{row['id']}")
-                
                 colA, colB = st.columns(2)
                 with colA:
                     if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
@@ -330,18 +319,17 @@ def page_minhas_visitas_loja():
                         nao_compareceu_visit(row["id"], user["id"], comentario if comentario.strip() else None)
                         st.warning(f"Visita {row['id']} marcada como 'Não Compareceu'.")
                         st.rerun()
-            
+
             elif row["status"] in ["Concluída", "Não Compareceu"]:
                 if row["status"] == "Concluída":
                     st.write("✔️ **Visita concluída**")
                 elif row["status"] == "Não Compareceu":
                     st.write("⚠️ **Promotor não compareceu**")
-                # Apenas botão de reabrir
                 if st.button("🔄 Reabrir visita", key=f"reabrir_{row['id']}"):
                     reabrir_visit(row["id"], user["id"])
                     st.info(f"Visita {row['id']} reaberta e agora está Pendente.")
                     st.rerun()
-                    
+
             st.markdown("---")
 
     with st.expander("❓ Precisa de ajuda?"):
@@ -350,8 +338,6 @@ def page_minhas_visitas_loja():
 
         📧 **Email:** [compras1@quitandaria.com.br](mailto:compras1@quitandaria.com.br)
         """)
-
-
 
 def get_suppliers():
     conn = get_conn()
@@ -393,7 +379,7 @@ def list_visits(store_id=None, status=None, start=None, end=None):
     cur = conn.cursor()
 
     q = [
-        "SELECT v.id, s.name AS loja, v.visit_date AS data, v.weekday AS dia_semana,",
+        "SELECT v.id, s.name AS loja, to_char(v.visit_date, 'DD/MM/YYYY') AS data, v.weekday AS dia_semana,",
         "v.buyer AS comprador, sp.name AS fornecedor, v.segment AS segmento,",
         "v.warranty AS garantia, v.info AS info, v.status, v.manager_comment",
         "FROM visits v JOIN stores s ON s.id = v.store_id JOIN suppliers sp ON sp.id = v.supplier_id WHERE 1=1"
@@ -429,8 +415,6 @@ def list_visits(store_id=None, status=None, start=None, end=None):
     ]
     return pd.DataFrame(rows, columns=cols)
 
-
-
 def update_visit(visit_id: int, buyer: str, supplier: str, segment: str, warranty: str, info: str):
     supplier_id = ensure_supplier(supplier)
     conn = get_conn()
@@ -461,16 +445,195 @@ def highlight_status(val):
     elif val == "Não Compareceu":
         return "background-color: #FFD966; color: black;"   # amarelo
     return ""
-    
+
 def style_table(df: pd.DataFrame):
     return df.style.applymap(highlight_status, subset=["status"])
 
+# -----------------------------
+# Importação em lote (modelo + parser)
+# -----------------------------
+ALLOWED_WARRANTY = {"", "Sim", "Não", "A confirmar"}
+
+def _normalize(text: str) -> str:
+    """Remove acentos e padroniza para comparação segura."""
+    if text is None:
+        return ""
+    return unidecode.unidecode(str(text)).strip()
+
+def _parse_date_any(s):
+    """Aceita 'DD/MM/AAAA', 'AAAA-MM-DD' ou objetos date/datetime."""
+    if isinstance(s, (datetime, date)):
+        return s.date() if isinstance(s, datetime) else s
+    s = str(s).strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except Exception:
+            pass
+    raise ValueError(f"Data inválida: {s} (use DD/MM/AAAA ou AAAA-MM-DD)")
+
+def generate_template_bytes() -> bytes:
+    """
+    Gera um Excel modelo com as colunas obrigatórias e exemplos.
+    Colunas:
+      loja, data, comprador, fornecedor, segmento, garantia, info, repetir_semana
+    """
+    exemplo = pd.DataFrame([
+        {
+            "loja": "HIPODROMO",
+            "data": (date.today() + timedelta(days=1)).strftime("%d/%m/%Y"),
+            "comprador": "Aldo",
+            "fornecedor": "Prolac",
+            "segmento": "BEBIDAS",
+            "garantia": "A confirmar",
+            "info": "Degustação de vinhos Arrivo",
+            "repetir_semana": "Não"
+        },
+        {
+            "loja": "RIO DOCE",
+            "data": (date.today() + timedelta(days=2)).strftime("%d/%m/%Y"),
+            "comprador": "Henrique",
+            "fornecedor": "Fornecedor XYZ",
+            "segmento": "HORTIFRUTIGRANJEIRO",
+            "garantia": "Sim",
+            "info": "Ação com promotor",
+            "repetir_semana": "Sim"
+        }
+    ])
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        exemplo.to_excel(w, index=False, sheet_name="Modelo")
+        # Aba com instruções/opções
+        pd.DataFrame({"segmento_permitido": SEGMENTOS_FIXOS}).to_excel(w, index=False, sheet_name="Opções")
+        pd.DataFrame({"garantia_permitida": list(ALLOWED_WARRANTY)}).to_excel(w, index=False, sheet_name="Garantia")
+        # Aba com lojas válidas
+        lojas_df = get_stores()[["name"]].rename(columns={"name": "loja_valida"})
+        lojas_df.to_excel(w, index=False, sheet_name="Lojas")
+    return buf.getvalue()
+
+def import_visits_from_dataframe(df: pd.DataFrame, created_by: int) -> dict:
+    """
+    Lê um DataFrame com colunas:
+      loja, data, comprador, fornecedor, segmento, garantia, info, repetir_semana
+    e cria as visitas. Retorna um resumo com sucessos/erros.
+    """
+    required_cols = ["loja", "data", "comprador", "fornecedor", "segmento", "garantia", "info", "repetir_semana"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Colunas faltando no arquivo: {', '.join(missing)}")
+
+    # Mapa de lojas válidas (normalizado)
+    stores = get_stores()
+    store_map_norm = { _normalize(n): i for i, n in zip(stores["id"], stores["name"]) }
+
+    ok, errors = 0, []
+    batch = []
+
+    for idx, row in df.iterrows():
+        try:
+            loja_raw = row["loja"]
+            loja_key = _normalize(loja_raw)
+            if loja_key not in store_map_norm:
+                raise ValueError(f"Loja '{loja_raw}' não encontrada. Veja a aba 'Lojas' do modelo.")
+
+            vdate = _parse_date_any(row["data"])
+            comprador = str(row["comprador"]).strip()
+            fornecedor = str(row["fornecedor"]).strip()
+            segmento = str(row["segmento"]).strip().upper()
+            garantia = str(row["garantia"]).strip()
+            info = "" if pd.isna(row["info"]) else str(row["info"]).strip()
+            repetir_semana_raw = str(row["repetir_semana"]).strip().lower()
+            repetir_semana = repetir_semana_raw in ("sim", "s", "true", "1")
+
+            if not comprador or not fornecedor:
+                raise ValueError("Comprador e Fornecedor são obrigatórios.")
+
+            if segmento not in SEGMENTOS_FIXOS:
+                raise ValueError(f"Segmento '{segmento}' inválido. Use valores da aba 'Opções'.")
+
+            if garantia not in ALLOWED_WARRANTY:
+                raise ValueError(f"Garantia '{garantia}' inválida. Valores aceitos: {', '.join(ALLOWED_WARRANTY)}")
+
+            # Empilha para criação (uma linha = uma loja)
+            batch.append({
+                "store_id": store_map_norm[loja_key],
+                "date": vdate,
+                "buyer": comprador,
+                "supplier": fornecedor,
+                "segment": segmento,
+                "warranty": garantia,
+                "info": info,
+                "repeat_weekly": repetir_semana
+            })
+            ok += 1
+
+        except Exception as e:
+            errors.append(f"Linha {idx+2}: {e}")  # +2 por causa do cabeçalho 1-based (Excel)
+
+    # Persistência
+    for item in batch:
+        create_visit(
+            store_ids=[item["store_id"]],
+            visit_date=item["date"],
+            buyer=item["buyer"],
+            supplier=item["supplier"],
+            segment=item["segment"],
+            warranty=item["warranty"],
+            info=item["info"],
+            created_by=created_by,
+            repeat_weekly=item["repeat_weekly"]
+        )
+
+    return {"sucesso": ok, "erros": errors}
+
+def import_visits_from_file(uploaded_file, created_by: int) -> dict:
+    """
+    Detecta extensão e carrega para DataFrame.
+    """
+    filename = uploaded_file.name.lower()
+    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+        df = pd.read_excel(uploaded_file)
+    elif filename.endswith(".csv"):
+        df = pd.read_csv(uploaded_file, sep=",")
+    else:
+        raise ValueError("Formato não suportado. Use .xlsx, .xls ou .csv")
+    return import_visits_from_dataframe(df, created_by)
 
 # -----------------------------
 # Páginas
 # -----------------------------
 def page_agendar_visita():
     st.header("Agendar Visita")
+
+    # --- Importação em lote ---
+    with st.expander("📥 Importar agendamentos por planilha"):
+        st.markdown("""
+        **Como usar**
+        1) Baixe o modelo abaixo e preencha uma linha por agendamento.  
+        2) Preencha exatamente as colunas: `loja, data, comprador, fornecedor, segmento, garantia, info, repetir_semana`.  
+        3) Em **segmento**, use apenas valores da aba **Opções**.  
+        4) Em **garantia**, use: vazio, *Sim*, *Não* ou *A confirmar*.  
+        5) Em **repetir_semana**, use **Sim** ou **Não** (aceita também `true/false/1/0`).  
+        """)
+        st.download_button(
+            label="⬇️ Baixar modelo (.xlsx)",
+            data=generate_template_bytes(),
+            file_name="modelo_agendamentos.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        uploaded = st.file_uploader("Envie sua planilha (.xlsx, .xls ou .csv)", type=["xlsx", "xls", "csv"])
+        if uploaded is not None:
+            try:
+                resumo = import_visits_from_file(uploaded, created_by=st.session_state.user["id"])
+                st.success(f"✅ Importação concluída: {resumo['sucesso']} agendamento(s) criado(s).")
+                if resumo["erros"]:
+                    with st.expander(f"⚠️ {len(resumo['erros'])} linha(s) com erro — clique para ver"):
+                        for err in resumo["erros"]:
+                            st.write(f"- {err}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Falha na importação: {e}")
 
     stores = get_stores()
     store_map = dict(zip(stores["name"], stores["id"]))
@@ -491,6 +654,8 @@ def page_agendar_visita():
         st.session_state.info = ""
         st.session_state.repetir = False
         st.session_state.form_reset = False  # não resetar de novo automaticamente
+
+    st.caption("💡 Dica: para muitos agendamentos, use a seção **Importar por planilha** acima.")
 
     with st.form("form_agendar"):
         lojas_escolhidas = st.multiselect("Lojas", stores["name"].tolist(), key="lojas_escolhidas")
@@ -521,13 +686,8 @@ def page_agendar_visita():
                 repeat_weekly=repetir
             )
             st.success("✅ Visita agendada com sucesso!")
-
-            # Ativa o reset do formulário para a próxima renderização
             st.session_state.form_reset = True
-
-            # Para a execução agora para evitar reenvio ou rerender imediato
             st.stop()
-
 
 def page_dashboard_comercial():
     st.header("Agenda Geral")
@@ -615,8 +775,6 @@ def page_dashboard_comercial():
                     st.success("Visita concluída!")
                     st.rerun()
 
-
-
 def login_form():
     st.title("Login - Sistema de Visitas")
 
@@ -642,11 +800,12 @@ def login_form():
             st.rerun()
         else:
             st.error("Email ou senha incorretos.")
-            
+
 def logout_button():
     if st.sidebar.button("Sair"):
         st.session_state.user = None
         st.rerun()
+
 # -----------------------------
 # Rodapé
 # -----------------------------
@@ -665,9 +824,6 @@ def footer():
         """,
         unsafe_allow_html=True
     )
-
-
-
 
 # -----------------------------
 # App principal
@@ -712,7 +868,6 @@ def main():
         logout_button()
         page_minhas_visitas_loja()
         footer()
-
 
 if __name__ == "__main__":
     main()
