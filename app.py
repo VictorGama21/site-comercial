@@ -522,6 +522,44 @@ def footer():
         </div>
         """, unsafe_allow_html=True
     )
+    
+def seed_data():
+    conn = get_conn()
+    cur = conn.cursor()
+
+    lojas = [
+        "HIPODROMO", "RIO DOCE", "CARUARU", "HIPODROMO CAFETERIA", "JANGA CAFETERIA",
+        "ESPINHEIRO", "AFLITOS", "PONTA VERDE", "JATIUCA", "FAROL", "BEIRA MAR",
+        "JARDIM ATLÂNTICO", "CASA CAIADA VERDAO", "JANGA VERDAO", "BAIRRO NOVO VERDAO"
+    ]
+
+    # cria lojas se não existirem
+    cur.execute("SELECT COUNT(*) FROM stores;")
+    if cur.fetchone()[0] == 0:
+        for loja in lojas:
+            cur.execute("INSERT INTO stores(name) VALUES(%s) ON CONFLICT DO NOTHING;", (loja,))
+
+    cur.execute("SELECT id, name FROM stores;")
+    stores_map = {name: _id for _id, name in cur.fetchall()}
+
+    # cria usuários se não existirem
+    cur.execute("SELECT COUNT(*) FROM users;")
+    if cur.fetchone()[0] == 0:
+        users = [
+            ("comercial@quitandaria.com", "Comercial Master", "comercial",
+             hash_password("123456"), None)
+        ]
+        for loja in lojas:
+            email_loja = "loja." + unidecode.unidecode(loja.lower().replace(" ", ".")) + "@quitandaria.com"
+            users.append((email_loja, loja, "loja", hash_password("123456"), stores_map.get(loja)))
+
+        cur.executemany(
+            "INSERT INTO users(email, name, role, password_hash, store_id) VALUES(%s,%s,%s,%s,%s);",
+            users
+        )
+
+    conn.commit()
+    conn.close()
 
 
 # -----------------------------
