@@ -573,40 +573,106 @@ def logout_button():
         st.session_state.user = None
         st.rerun()
 
-def create_visit(store_ids, visit_date: date, buyer: str, supplier: str, segment: str,
-                 warranty: str, info: str, created_by: int, repeat_weekly=False):
+# -----------------------------
+# Criar Visita
+# -----------------------------
+def create_visit(store_ids, visit_date: date, buyer: str, supplier: str,
+                 segment: str, warranty: str, info: str,
+                 created_by: int, repeat_weekly=False):
+
     supplier_id = ensure_supplier(supplier)
     conn = get_conn()
     cur = conn.cursor()
 
     def insert_one(vdate, store_id):
-        cur.execute("""
-            INSERT INTO visits (store_id, visit_date, weekday, buyer, supplier_id, segment, warranty, info, status, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pendente', %s)
-            ON CONFLICT (store_id, visit_date, buyer, supplier_id, segment) DO NOTHING;
-        """, (
-            store_id,
-            vdate,
-            WEEKDAYS_PT[vdate.weekday()],
-            buyer,
-            supplier_id,
-            segment,
-            warranty,
-            info,
-            created_by
-        ))
+        try:
+            cur.execute("""
+                INSERT INTO visits (store_id, visit_date, weekday, buyer,
+                                    supplier_id, segment, warranty, info, status, created_by)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pendente', %s)
+                ON CONFLICT DO NOTHING;
+            """, (store_id, vdate, WEEKDAYS_PT[vdate.weekday()], buyer,
+                  supplier_id, segment, warranty, info, created_by))
+        except Exception as e:
+            print(f"[WARN] Falha ao inserir visita: {e}")
 
     for store_id in store_ids:
-        # visita principal
         insert_one(visit_date, store_id)
 
-        # repetições semanais (se marcado)
         if repeat_weekly:
-            for i in range(1, 4):  # apenas mais 3 semanas
+            for i in range(1, 4):
                 insert_one(visit_date + relativedelta(weeks=i), store_id)
 
     conn.commit()
     conn.close()
+
+
+# -----------------------------
+# Importação em lote
+# -----------------------------
+def import_visits_from_dataframe(df: pd.DataFrame, created_by: int) -> dict:
+    """
+    Lê um DataFrame com colunas: loja, data, comprador, fornecedor, segmento,
+    garantia, info, repetir_semana e cria as visitas.
+    Retorna um resumo com sucessos/erros.
+    """
+    required_cols = ["loja", "data", "comprador", "fornecedor", "segmento",
+                     "garantia", "info", "repetir_semana"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Colunas faltando no arquivo: {', '.join(missing)}")
+
+    # Mapa de lojas válidas (normalizado)
+    stores = get_stores()
+    store_map_norm = {unidecode.unidecode(n).strip().upper(): i
+                      for i, n in zip(stores["id"], stores["name"])}
+
+    ok, errors = 0, []
+
+    for idx, row in df.iterrows():
+        try:
+            loja_raw = str(row["loja"]).strip()
+            loja_key = unidecode.unidecode(loja_raw).strip().upper()
+
+            if loja_key not in store_map_norm:
+                raise ValueError(f"Loja '{loja_raw}' não encontrada. Veja a aba 'Lojas' do modelo.")
+
+            vdate = _parse_date_any(row["data"])
+            comprador = str(row["comprador"]).strip()
+            fornecedor = str(row["fornecedor"]).strip()
+            segmento = str(row["segmento"]).strip().upper()
+            garantia = str(row["garantia"]).strip()
+            info = "" if pd.isna(row["info"]) else str(row["info"]).strip()
+            repetir_semana_raw = str(row["repetir_semana"]).strip().lower()
+            repetir_semana = repetir_semana_raw in ("sim", "s", "true", "1")
+
+            if not comprador or not fornecedor:
+                raise ValueError("Comprador e Fornecedor são obrigatórios.")
+            if segmento not in SEGMENTOS_FIXOS:
+                raise ValueError(f"Segmento '{segmento}' inválido. Use valores da aba 'Opções'.")
+            if garantia not in ALLOWED_WARRANTY:
+                raise ValueError(f"Garantia '{garantia}' inválido. Valores aceitos: {', '.join(ALLOWED_WARRANTY)}")
+
+            # Cria a visita (já controla repetições)
+            create_visit(
+                store_ids=[store_map_norm[loja_key]],
+                visit_date=vdate,
+                buyer=comprador,
+                supplier=fornecedor,
+                segment=segmento,
+                warranty=garantia,
+                info=info,
+                created_by=created_by,
+                repeat_weekly=repetir_semana
+            )
+            ok += 1
+
+        except Exception as e:
+            errors.append(f"Linha {idx+2}: {e}")  # +2 porque Excel começa na linha 2
+
+    return {"sucesso": ok, "erros": errors}
+
+
 # -----------------------------
 # Página "Agendar Visita"
 # -----------------------------
@@ -631,10 +697,12 @@ def page_agendar_visita():
             use_container_width=True
         )
 
-        uploaded = st.file_uploader("Envie sua planilha (.xlsx, .xls ou .csv)", type=["xlsx", "xls", "csv"])
+        uploaded = st.file_uploader("Envie sua planilha (.xlsx, .xls ou .csv)",
+                                    type=["xlsx", "xls", "csv"])
         if uploaded is not None:
             try:
-                resumo = import_visits_from_file(uploaded, created_by=st.session_state.user["id"])
+                resumo = import_visits_from_file(uploaded,
+                                                 created_by=st.session_state.user["id"])
                 st.success(f"✅ Importação concluída: {resumo['sucesso']} agendamento(s) criado(s).")
                 if resumo["erros"]:
                     with st.expander(f"⚠️ {len(resumo['erros'])} linha(s) com erro — clique para ver"):
