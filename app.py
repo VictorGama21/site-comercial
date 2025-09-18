@@ -438,6 +438,85 @@ def highlight_status(val):
 
 def style_table(df: pd.DataFrame):
     return df.style.applymap(highlight_status, subset=["status"])
+# -----------------------------
+# Utilitários de dados
+# -----------------------------
+def get_stores():
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
+    conn.close()
+    return df
+
+
+def get_suppliers():
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT id, name FROM suppliers ORDER BY name;", conn)
+    conn.close()
+    return df
+
+
+def ensure_supplier(name: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO suppliers(name)
+        VALUES(%s)
+        ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name
+        RETURNING id;
+    """, (name.strip(),))
+    supplier_id = cur.fetchone()[0]
+    conn.commit()
+    conn.close()
+    return supplier_id
+
+
+# -----------------------------
+# Gera template Excel para importação
+# -----------------------------
+def generate_template_bytes() -> bytes:
+    exemplo = pd.DataFrame([{
+        "loja": "HIPODROMO",
+        "data": (date.today() + timedelta(days=1)).strftime("%d/%m/%Y"),
+        "comprador": "Aldo",
+        "fornecedor": "Prolac",
+        "segmento": "BEBIDAS",
+        "garantia": "A confirmar",
+        "info": "Degustação de vinhos Arrivo",
+        "repetir_semana": "Não"
+    }, {
+        "loja": "RIO DOCE",
+        "data": (date.today() + timedelta(days=2)).strftime("%d/%m/%Y"),
+        "comprador": "Henrique",
+        "fornecedor": "Fornecedor XYZ",
+        "segmento": "HORTIFRUTIGRANJEIRO",
+        "garantia": "Sim",
+        "info": "Ação com promotor",
+        "repetir_semana": "Sim"
+    }])
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        exemplo.to_excel(w, index=False, sheet_name="Modelo")
+        pd.DataFrame({"segmento_permitido": SEGMENTOS_FIXOS}).to_excel(w, index=False, sheet_name="Opções")
+        pd.DataFrame({"garantia_permitida": list(ALLOWED_WARRANTY)}).to_excel(w, index=False, sheet_name="Garantia")
+        lojas_df = get_stores()[["name"]].rename(columns={"name": "loja_valida"})
+        lojas_df.to_excel(w, index=False, sheet_name="Lojas")
+    return buf.getvalue()
+
+
+# -----------------------------
+# Parser de data flexível
+# -----------------------------
+def _parse_date_any(s):
+    if isinstance(s, (datetime, date)):
+        return s.date() if isinstance(s, datetime) else s
+    s = str(s).strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except Exception:
+            pass
+    raise ValueError(f"Data inválida: {s} (use DD/MM/AAAA ou AAAA-MM-DD)")
 
 # -----------------------------
 # Dashboard Comercial
