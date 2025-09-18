@@ -1,23 +1,24 @@
 import streamlit as st
 import psycopg2
 import pandas as pd
-from datetime import datetime, date, timedelta
-import hashlib
+from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
+import hashlib
 import unidecode
 import os
 from dotenv import load_dotenv
-import plotly.express as px
 import io
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 
+# -----------------------------
+# Configuração do ambiente
+# -----------------------------
 load_dotenv()
-
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://usuario:senha@host:porta/database")
 
 # -----------------------------
-# Utilidades de segurança
+# Utilidades
 # -----------------------------
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
@@ -25,8 +26,25 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return hash_password(password) == hashed
 
+WEEKDAYS_PT = {
+    0: "Segunda-feira",
+    1: "Terça-feira",
+    2: "Quarta-feira",
+    3: "Quinta-feira",
+    4: "Sexta-feira",
+    5: "Sábado",
+    6: "Domingo",
+}
+
+SEGMENTOS_FIXOS = [
+    "HORTIFRUTIGRANJEIRO", "EMBALAGEM", "CONGELADOS", "LATICINIOS", "SUPLEMENTOS",
+    "PADARIA", "BEBIDAS", "MERCEARIA", "GRANJEIROS", "ACOUGUE", "OLEOS",
+    "HIGIENE E BELEZA", "PET", "LIMPEZA DA CASA", "ECOMMERCE", "ROTISSERIA",
+    "FRIOS E EMBUTIDOS", "QUEIJOS", "FLORICULTURA", "EMPORIO", "BAZAR"
+]
+
 # -----------------------------
-# Base de dados
+# Banco de dados
 # -----------------------------
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
@@ -83,58 +101,9 @@ def init_db():
     conn.commit()
     conn.close()
 
-def update_manager_comment(visit_id: int, comment: str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE visits
-        SET manager_comment = %s
-        WHERE id = %s;
-    """, (comment, visit_id))
-    conn.commit()
-    conn.close()
-
-def nao_compareceu_visit(visit_id: int, user_id: int, manager_comment: str = None):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE visits
-        SET status = 'Não Compareceu',
-            completed_at = CURRENT_TIMESTAMP,
-            completed_by = %s,
-            manager_comment = %s
-        WHERE id = %s;
-    """, (user_id, manager_comment, visit_id))
-    conn.commit()
-    conn.close()
-
-def concluir_visit(visit_id: int, user_id: int, manager_comment: str = None):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE visits
-        SET status = 'Concluída',
-            completed_at = CURRENT_TIMESTAMP,
-            completed_by = %s,
-            manager_comment = %s
-        WHERE id = %s;
-    """, (user_id, manager_comment, visit_id))
-    conn.commit()
-    conn.close()
-
-def reabrir_visit(visit_id: int, user_id: int):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE visits
-        SET status = 'Pendente',
-            completed_at = NULL,
-            completed_by = NULL
-        WHERE id = %s;
-    """, (visit_id,))
-    conn.commit()
-    conn.close()
-
+# -----------------------------
+# Seed inicial
+# -----------------------------
 def seed_data():
     conn = get_conn()
     cur = conn.cursor()
@@ -171,65 +140,7 @@ def seed_data():
     conn.close()
 
 # -----------------------------
-# Funções de dados
-# -----------------------------
-WEEKDAYS_PT = {
-    0: "Segunda-feira",
-    1: "Terça-feira",
-    2: "Quarta-feira",
-    3: "Quinta-feira",
-    4: "Sexta-feira",
-    5: "Sábado",
-    6: "Domingo",
-}
-
-SEGMENTOS_FIXOS = [
-    "HORTIFRUTIGRANJEIRO", "EMBALAGEM", "CONGELADOS", "LATICINIOS", "SUPLEMENTOS",
-    "PADARIA", "BEBIDAS", "MERCEARIA", "GRANJEIROS", "ACOUGUE", "OLEOS",
-    "HIGIENE E BELEZA", "PET", "LIMPEZA DA CASA", "ECOMMERCE", "ROTISSERIA",
-    "FRIOS E EMBUTIDOS", "QUEIJOS", "FLORICULTURA", "EMPORIO", "BAZAR"
-]
-
-def get_stores():
-    conn = get_conn()
-    df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
-    conn.close()
-    return df
-
-def export_visitas_excel(df):
-    output = io.BytesIO()
-    safe_df = df.copy()
-    if "data_datetime" in safe_df.columns:
-        safe_df = safe_df.drop(columns=["data_datetime"])
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        safe_df.to_excel(writer, index=False, sheet_name="Visitas")
-
-    output.seek(0)
-    wb = load_workbook(output)
-    ws = wb.active
-
-    col_status = None
-    for idx, cell in enumerate(ws[1], start=1):
-        if cell.value == "status":
-            col_status = idx
-            break
-
-    if col_status:
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_status, max_col=col_status):
-            for cell in row:
-                if cell.value and str(cell.value).lower() == "concluída":
-                    cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                elif cell.value and str(cell.value).lower() == "pendente":
-                    cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-                elif cell.value and str(cell.value).lower() == "não compareceu":
-                    cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")
-
-    final_output = io.BytesIO()
-    wb.save(final_output)
-    return final_output.getvalue()
-
-# -----------------------------
-# Criação de visitas (corrigido para repetir semanalmente)
+# Funções de CRUD de visitas
 # -----------------------------
 def ensure_supplier(name: str):
     conn = get_conn()
@@ -264,3 +175,94 @@ def create_visit(store_ids, visit_date: date, buyer: str, supplier: str, segment
 
     conn.commit()
     conn.close()
+
+def concluir_visit(visit_id: int, user_id: int, manager_comment: str = None):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Concluída',
+            completed_at = CURRENT_TIMESTAMP,
+            completed_by = %s,
+            manager_comment = %s
+        WHERE id = %s;
+    """, (user_id, manager_comment, visit_id))
+    conn.commit()
+    conn.close()
+
+def nao_compareceu_visit(visit_id: int, user_id: int, manager_comment: str = None):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Não Compareceu',
+            completed_at = CURRENT_TIMESTAMP,
+            completed_by = %s,
+            manager_comment = %s
+        WHERE id = %s;
+    """, (user_id, manager_comment, visit_id))
+    conn.commit()
+    conn.close()
+
+def reabrir_visit(visit_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Pendente',
+            completed_at = NULL,
+            completed_by = NULL
+        WHERE id = %s;
+    """, (visit_id,))
+    conn.commit()
+    conn.close()
+
+# -----------------------------
+# Exportação para Excel
+# -----------------------------
+def export_visitas_excel(df):
+    output = io.BytesIO()
+    safe_df = df.copy()
+    if "data_datetime" in safe_df.columns:
+        safe_df = safe_df.drop(columns=["data_datetime"])
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        safe_df.to_excel(writer, index=False, sheet_name="Visitas")
+
+    output.seek(0)
+    wb = load_workbook(output)
+    ws = wb.active
+
+    col_status = None
+    for idx, cell in enumerate(ws[1], start=1):
+        if cell.value == "status":
+            col_status = idx
+            break
+
+    if col_status:
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_status, max_col=col_status):
+            for cell in row:
+                if cell.value and str(cell.value).lower() == "concluída":
+                    cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                elif cell.value and str(cell.value).lower() == "pendente":
+                    cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                elif cell.value and str(cell.value).lower() == "não compareceu":
+                    cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")
+
+    final_output = io.BytesIO()
+    wb.save(final_output)
+    return final_output.getvalue()
+
+# -----------------------------
+# Funções auxiliares
+# -----------------------------
+def get_stores():
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
+    conn.close()
+    return df
+
+# -----------------------------
+# Inicialização do banco
+# -----------------------------
+init_db()
+seed_data()
