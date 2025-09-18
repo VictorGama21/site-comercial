@@ -16,8 +16,9 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://usuario:senha@host:porta/database")
 
+
 # -----------------------------
-# Segurança
+# Utilidades de segurança
 # -----------------------------
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
@@ -28,7 +29,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 # -----------------------------
-# Conexão / Init DB
+# Base de dados
 # -----------------------------
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
@@ -93,36 +94,95 @@ def init_db():
     conn.close()
 
 
-# -----------------------------
-# Utilitários
-# -----------------------------
-def get_stores():
+def update_manager_comment(visit_id: int, comment: str):
     conn = get_conn()
-    df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
+    cur = conn.cursor()
+    cur.execute("UPDATE visits SET manager_comment = %s WHERE id = %s;", (comment, visit_id))
+    conn.commit()
     conn.close()
-    return df
 
 
-def get_suppliers():
-    conn = get_conn()
-    df = pd.read_sql_query("SELECT id, name FROM suppliers ORDER BY name;", conn)
-    conn.close()
-    return df
-
-
-def ensure_supplier(name: str):
+def nao_compareceu_visit(visit_id: int, user_id: int, manager_comment: str = None):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO suppliers(name)
-        VALUES(%s)
-        ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name
-        RETURNING id;
-    """, (name.strip(),))
-    supplier_id = cur.fetchone()[0]
+        UPDATE visits
+        SET status = 'Não Compareceu',
+            completed_at = CURRENT_TIMESTAMP,
+            completed_by = %s,
+            manager_comment = %s
+        WHERE id = %s;
+    """, (user_id, manager_comment, visit_id))
     conn.commit()
     conn.close()
-    return supplier_id
+
+
+def concluir_visit(visit_id: int, user_id: int, manager_comment: str = None):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Concluída',
+            completed_at = CURRENT_TIMESTAMP,
+            completed_by = %s,
+            manager_comment = %s
+        WHERE id = %s;
+    """, (user_id, manager_comment, visit_id))
+    conn.commit()
+    conn.close()
+
+
+def reabrir_visit(visit_id: int, user_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE visits
+        SET status = 'Pendente',
+            completed_at = NULL,
+            completed_by = NULL
+        WHERE id = %s;
+    """, (visit_id,))
+    conn.commit()
+    conn.close()
+
+
+def seed_data():
+    conn = get_conn()
+    cur = conn.cursor()
+
+    lojas = [
+        "HIPODROMO", "RIO DOCE", "CARUARU", "HIPODROMO CAFETERIA", "JANGA CAFETERIA",
+        "ESPINHEIRO", "AFLITOS", "PONTA VERDE", "JATIUCA", "FAROL", "BEIRA MAR",
+        "JARDIM ATLÂNTICO", "CASA CAIADA VERDAO", "JANGA VERDAO", "BAIRRO NOVO VERDAO"
+    ]
+
+    cur.execute("SELECT COUNT(*) FROM stores;")
+    if cur.fetchone()[0] == 0:
+        for loja in lojas:
+            cur.execute("INSERT INTO stores(name) VALUES(%s) ON CONFLICT DO NOTHING;", (loja,))
+
+    cur.execute("SELECT id, name FROM stores;")
+    stores_map = {name: _id for _id, name in cur.fetchall()}
+
+    cur.execute("SELECT COUNT(*) FROM users;")
+    if cur.fetchone()[0] == 0:
+        users = [
+            ("comercial@quitandaria.com", "Comercial Master", "comercial",
+             hash_password("123456"), None)
+        ]
+        for loja in lojas:
+            email_loja = "loja." + unidecode.unidecode(loja.lower().replace(" ", ".")) + "@quitandaria.com"
+            users.append((email_loja, loja, "loja", hash_password("123456"), stores_map.get(loja)))
+
+        cur.executemany(
+            "INSERT INTO users(email, name, role, password_hash, store_id) VALUES(%s,%s,%s,%s,%s);",
+            users
+        )
+
+    conn.commit()
+    conn.close()
+
+
 # -----------------------------
 # Configurações fixas
 # -----------------------------
@@ -139,8 +199,6 @@ SEGMENTOS_FIXOS = [
 ]
 
 ALLOWED_WARRANTY = {"", "Sim", "Não", "A confirmar"}
-
-
 # -----------------------------
 # Exportação Excel (colorido)
 # -----------------------------
@@ -260,12 +318,14 @@ def page_minhas_visitas_loja():
                 colA, colB = st.columns(2)
                 with colA:
                     if st.button("✅ Concluir", key=f"concluir_{row['id']}"):
-                        concluir_visit(row["id"], user["id"], comentario if comentario.strip() else None)
+                        concluir_visit(row["id"], user["id"],
+                                       comentario if comentario.strip() else None)
                         st.success(f"Visita {row['id']} concluída com sucesso!")
                         st.rerun()
                 with colB:
                     if st.button("❌ Fornecedor não foi", key=f"nao_compareceu_{row['id']}"):
-                        nao_compareceu_visit(row["id"], user["id"], comentario if comentario.strip() else None)
+                        nao_compareceu_visit(row["id"], user["id"],
+                                             comentario if comentario.strip() else None)
                         st.warning(f"Visita {row['id']} marcada como 'Não Compareceu'.")
                         st.rerun()
             elif row["status"] in ["Concluída", "Não Compareceu"]:
@@ -283,9 +343,12 @@ def page_minhas_visitas_loja():
 
     with st.expander("❓ Precisa de ajuda?"):
         st.markdown("""
-        Caso esteja com dúvidas ou problemas com a agenda de visitas, entre em contato com o setor de compras:
+        Caso esteja com dúvidas ou problemas com a agenda de visitas,
+        entre em contato com o setor de compras:
         📧 **Email:** [compras1@quitandaria.com.br](mailto:compras1@quitandaria.com.br)
         """)
+
+
 # -----------------------------
 # Listagem e atualização de visitas
 # -----------------------------
@@ -376,7 +439,6 @@ def highlight_status(val):
 def style_table(df: pd.DataFrame):
     return df.style.applymap(highlight_status, subset=["status"])
 
-
 # -----------------------------
 # Dashboard Comercial
 # -----------------------------
@@ -392,9 +454,11 @@ def page_dashboard_comercial():
         loja_nome = st.selectbox("Loja", stores_filter)
         loja_id = None if loja_nome == "Todas" else int(stores.loc[stores["name"] == loja_nome, "id"].iloc[0])
     with col2:
-        status = st.multiselect("Status",
-                                ["Pendente", "Concluída", "Não Compareceu"],
-                                default=["Pendente", "Concluída", "Não Compareceu"])
+        status = st.multiselect(
+            "Status",
+            ["Pendente", "Concluída", "Não Compareceu"],
+            default=["Pendente", "Concluída", "Não Compareceu"]
+        )
     with col3:
         dia_semana = st.selectbox("Dia da semana", dias_semana)
 
@@ -440,12 +504,15 @@ def page_dashboard_comercial():
 
         comprador = st.text_input("Comprador", vrow["comprador"])
         fornecedor = st.text_input("Fornecedor", vrow["fornecedor"])
-        segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS,
-                                index=SEGMENTOS_FIXOS.index(vrow["segmento"])
-                                if vrow["segmento"] in SEGMENTOS_FIXOS else 0)
-        garantia = st.selectbox("Garantia", ["", "Sim", "Não", "A confirmar"],
-                                index=["", "Sim", "Não", "A confirmar"].index(vrow["garantia"])
-                                if vrow["garantia"] in ["", "Sim", "Não", "A confirmar"] else 0)
+        segmento = st.selectbox(
+            "Segmento", SEGMENTOS_FIXOS,
+            index=SEGMENTOS_FIXOS.index(vrow["segmento"]) if vrow["segmento"] in SEGMENTOS_FIXOS else 0
+        )
+        garantia = st.selectbox(
+            "Garantia", ["", "Sim", "Não", "A confirmar"],
+            index=["", "Sim", "Não", "A confirmar"].index(vrow["garantia"])
+            if vrow["garantia"] in ["", "Sim", "Não", "A confirmar"] else 0
+        )
         info = st.text_area("Informações", vrow["info"])
 
         col1, col2, col3, col4 = st.columns(4)
@@ -469,7 +536,8 @@ def page_dashboard_comercial():
             if vrow["status"] == "Pendente":
                 comentario = st.text_area("💬 Comentário do Gerente (opcional)", key=f"comentario_{visit_id}")
                 if st.button("✅ Concluir visita", key=f"concluir_{visit_id}"):
-                    concluir_visit(visit_id, st.session_state.user["id"], comentario if comentario.strip() else None)
+                    concluir_visit(visit_id, st.session_state.user["id"],
+                                   comentario if comentario.strip() else None)
                     st.success("Visita concluída!")
                     st.rerun()
 
@@ -522,44 +590,6 @@ def footer():
         </div>
         """, unsafe_allow_html=True
     )
-    
-def seed_data():
-    conn = get_conn()
-    cur = conn.cursor()
-
-    lojas = [
-        "HIPODROMO", "RIO DOCE", "CARUARU", "HIPODROMO CAFETERIA", "JANGA CAFETERIA",
-        "ESPINHEIRO", "AFLITOS", "PONTA VERDE", "JATIUCA", "FAROL", "BEIRA MAR",
-        "JARDIM ATLÂNTICO", "CASA CAIADA VERDAO", "JANGA VERDAO", "BAIRRO NOVO VERDAO"
-    ]
-
-    # cria lojas se não existirem
-    cur.execute("SELECT COUNT(*) FROM stores;")
-    if cur.fetchone()[0] == 0:
-        for loja in lojas:
-            cur.execute("INSERT INTO stores(name) VALUES(%s) ON CONFLICT DO NOTHING;", (loja,))
-
-    cur.execute("SELECT id, name FROM stores;")
-    stores_map = {name: _id for _id, name in cur.fetchall()}
-
-    # cria usuários se não existirem
-    cur.execute("SELECT COUNT(*) FROM users;")
-    if cur.fetchone()[0] == 0:
-        users = [
-            ("comercial@quitandaria.com", "Comercial Master", "comercial",
-             hash_password("123456"), None)
-        ]
-        for loja in lojas:
-            email_loja = "loja." + unidecode.unidecode(loja.lower().replace(" ", ".")) + "@quitandaria.com"
-            users.append((email_loja, loja, "loja", hash_password("123456"), stores_map.get(loja)))
-
-        cur.executemany(
-            "INSERT INTO users(email, name, role, password_hash, store_id) VALUES(%s,%s,%s,%s,%s);",
-            users
-        )
-
-    conn.commit()
-    conn.close()
 
 
 # -----------------------------
@@ -610,4 +640,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
