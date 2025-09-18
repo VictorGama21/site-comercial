@@ -130,6 +130,22 @@ def concluir_visit(visit_id: int, user_id: int, manager_comment: str = None):
     """, (user_id, manager_comment, visit_id))
     conn.commit()
     conn.close()
+    
+def import_visits_from_file(uploaded_file, created_by: int) -> dict:
+    """
+    Detecta extensão e carrega o arquivo para DataFrame.
+    Aceita .xlsx, .xls e .csv.
+    """
+    filename = uploaded_file.name.lower()
+
+    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+        df = pd.read_excel(uploaded_file)
+    elif filename.endswith(".csv"):
+        df = pd.read_csv(uploaded_file, sep=",")
+    else:
+        raise ValueError("Formato não suportado. Use .xlsx, .xls ou .csv")
+
+    return import_visits_from_dataframe(df, created_by)
 
 
 def reabrir_visit(visit_id: int, user_id: int):
