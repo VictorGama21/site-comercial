@@ -573,6 +573,130 @@ def logout_button():
         st.session_state.user = None
         st.rerun()
 
+def create_visit(store_ids, visit_date: date, buyer: str, supplier: str, segment: str,
+                 warranty: str, info: str, created_by: int, repeat_weekly=False):
+    supplier_id = ensure_supplier(supplier)
+    conn = get_conn()
+    cur = conn.cursor()
+
+    def insert_one(vdate, store_id):
+        cur.execute("""
+            INSERT INTO visits (store_id, visit_date, weekday, buyer, supplier_id, segment, warranty, info, status, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pendente', %s)
+            ON CONFLICT (store_id, visit_date, buyer, supplier_id, segment) DO NOTHING;
+        """, (
+            store_id,
+            vdate,
+            WEEKDAYS_PT[vdate.weekday()],
+            buyer,
+            supplier_id,
+            segment,
+            warranty,
+            info,
+            created_by
+        ))
+
+    for store_id in store_ids:
+        # visita principal
+        insert_one(visit_date, store_id)
+
+        # repetições semanais (se marcado)
+        if repeat_weekly:
+            for i in range(1, 4):  # apenas mais 3 semanas
+                insert_one(visit_date + relativedelta(weeks=i), store_id)
+
+    conn.commit()
+    conn.close()
+# -----------------------------
+# Página "Agendar Visita"
+# -----------------------------
+def page_agendar_visita():
+    st.header("Agendar Visita")
+
+    # --- Importação em lote ---
+    with st.expander("📥 Importar agendamentos por planilha"):
+        st.markdown("""
+        **Como usar**
+        1) Baixe o modelo abaixo e preencha uma linha por agendamento.  
+        2) Preencha exatamente as colunas: loja, data, comprador, fornecedor, segmento, garantia, info, repetir_semana.  
+        3) Em **segmento**, use apenas valores da aba **Opções**.  
+        4) Em **garantia**, use: vazio, *Sim*, *Não* ou *A confirmar*.  
+        5) Em **repetir_semana**, use **Sim** ou **Não** (aceita também true/false/1/0).  
+        """)
+        st.download_button(
+            label="⬇️ Baixar modelo (.xlsx)",
+            data=generate_template_bytes(),
+            file_name="modelo_agendamentos.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+        uploaded = st.file_uploader("Envie sua planilha (.xlsx, .xls ou .csv)", type=["xlsx", "xls", "csv"])
+        if uploaded is not None:
+            try:
+                resumo = import_visits_from_file(uploaded, created_by=st.session_state.user["id"])
+                st.success(f"✅ Importação concluída: {resumo['sucesso']} agendamento(s) criado(s).")
+                if resumo["erros"]:
+                    with st.expander(f"⚠️ {len(resumo['erros'])} linha(s) com erro — clique para ver"):
+                        for err in resumo["erros"]:
+                            st.write(f"- {err}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Falha na importação: {e}")
+
+    # --- Agendamento manual ---
+    stores = get_stores()
+    store_map = dict(zip(stores["name"], stores["id"]))
+    fornecedores_sugestao = get_suppliers()["name"].tolist()
+    compradores = ["Aldo", "Eduardo", "Henrique", "Jose Duda", "Thiago", "Victor", "Robson", "Outro"]
+
+    if "form_reset" not in st.session_state:
+        st.session_state.form_reset = True
+
+    if st.session_state.form_reset:
+        st.session_state.lojas_escolhidas = []
+        st.session_state.dt = date.today() + timedelta(days=1)
+        st.session_state.comprador = "Aldo"
+        st.session_state.fornecedor = ""
+        st.session_state.segmento = SEGMENTOS_FIXOS[0]
+        st.session_state.garantia = ""
+        st.session_state.info = ""
+        st.session_state.repetir = False
+        st.session_state.form_reset = False
+
+    st.caption("💡 Dica: para muitos agendamentos, use a seção **Importar por planilha** acima.")
+
+    with st.form("form_agendar"):
+        lojas_escolhidas = st.multiselect("Lojas", stores["name"].tolist(), key="lojas_escolhidas")
+        dt = st.date_input("Data", format="DD/MM/YYYY", key="dt")
+        comprador = st.selectbox("Comprador responsável", compradores, key="comprador")
+        fornecedor = st.text_input("Fornecedor", key="fornecedor")
+        segmento = st.selectbox("Segmento", SEGMENTOS_FIXOS, key="segmento")
+        garantia = st.selectbox("Garantia comercial", ["", "Sim", "Não", "A confirmar"], key="garantia")
+        info = st.text_area("Informações", key="info")
+        repetir = st.checkbox("Repetir toda semana (4 semanas)", key="repetir")
+
+        submitted = st.form_submit_button("Agendar")
+        if submitted:
+            if not lojas_escolhidas or not fornecedor:
+                st.warning("Preencha todos os campos obrigatórios.")
+            else:
+                store_ids = [store_map[l] for l in lojas_escolhidas]
+                create_visit(
+                    store_ids=store_ids,
+                    visit_date=dt,
+                    buyer=comprador,
+                    supplier=fornecedor,
+                    segment=segmento,
+                    warranty=garantia,
+                    info=info,
+                    created_by=st.session_state.user["id"],
+                    repeat_weekly=repetir
+                )
+                st.success("✅ Visita agendada com sucesso!")
+                st.session_state.form_reset = True
+                st.stop()
+
 
 # -----------------------------
 # Rodapé
