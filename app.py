@@ -1,7 +1,7 @@
 import streamlit as st
 import psycopg2
 import pandas as pd
-from datetime import datetime, date
+from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 import hashlib
 import unidecode
@@ -53,13 +53,13 @@ def init_db():
     conn = get_conn()
     cur = conn.cursor()
 
+    # Tabelas
     cur.execute("""
         CREATE TABLE IF NOT EXISTS stores (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE
         );
     """)
-
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -70,14 +70,12 @@ def init_db():
             store_id INTEGER REFERENCES stores(id)
         );
     """)
-
     cur.execute("""
         CREATE TABLE IF NOT EXISTS suppliers (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE
         );
     """)
-
     cur.execute("""
         CREATE TABLE IF NOT EXISTS visits (
             id SERIAL PRIMARY KEY,
@@ -97,7 +95,6 @@ def init_db():
             manager_comment TEXT
         );
     """)
-
     conn.commit()
     conn.close()
 
@@ -217,17 +214,45 @@ def reabrir_visit(visit_id: int):
     conn.commit()
     conn.close()
 
+def get_stores():
+    conn = get_conn()
+    df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
+    conn.close()
+    return df
+
+def get_visits(user):
+    conn = get_conn()
+    if user["role"] == "comercial":
+        df = pd.read_sql_query("""
+            SELECT v.id, s.name AS store, v.visit_date, v.weekday, u.name AS buyer, sup.name AS supplier,
+                   v.segment, v.warranty, v.info, v.status, v.manager_comment
+            FROM visits v
+            LEFT JOIN stores s ON v.store_id = s.id
+            LEFT JOIN users u ON v.created_by = u.id
+            LEFT JOIN suppliers sup ON v.supplier_id = sup.id
+            ORDER BY v.visit_date DESC;
+        """, conn)
+    else:
+        df = pd.read_sql_query("""
+            SELECT v.id, s.name AS store, v.visit_date, v.weekday, u.name AS buyer, sup.name AS supplier,
+                   v.segment, v.warranty, v.info, v.status, v.manager_comment
+            FROM visits v
+            LEFT JOIN stores s ON v.store_id = s.id
+            LEFT JOIN users u ON v.created_by = u.id
+            LEFT JOIN suppliers sup ON v.supplier_id = sup.id
+            WHERE v.store_id = %s
+            ORDER BY v.visit_date DESC;
+        """, conn, params=(user["store_id"],))
+    conn.close()
+    return df
+
 # -----------------------------
-# Exportação para Excel
+# Exportação Excel
 # -----------------------------
 def export_visitas_excel(df):
     output = io.BytesIO()
-    safe_df = df.copy()
-    if "data_datetime" in safe_df.columns:
-        safe_df = safe_df.drop(columns=["data_datetime"])
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        safe_df.to_excel(writer, index=False, sheet_name="Visitas")
-
+        df.to_excel(writer, index=False, sheet_name="Visitas")
     output.seek(0)
     wb = load_workbook(output)
     ws = wb.active
@@ -241,28 +266,112 @@ def export_visitas_excel(df):
     if col_status:
         for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=col_status, max_col=col_status):
             for cell in row:
-                if cell.value and str(cell.value).lower() == "concluída":
+                if cell.value == "Concluída":
                     cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                elif cell.value and str(cell.value).lower() == "pendente":
+                elif cell.value == "Pendente":
                     cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-                elif cell.value and str(cell.value).lower() == "não compareceu":
+                elif cell.value == "Não Compareceu":
                     cell.fill = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")
-
     final_output = io.BytesIO()
     wb.save(final_output)
     return final_output.getvalue()
 
 # -----------------------------
-# Funções auxiliares
-# -----------------------------
-def get_stores():
-    conn = get_conn()
-    df = pd.read_sql_query("SELECT id, name FROM stores ORDER BY name;", conn)
-    conn.close()
-    return df
-
-# -----------------------------
-# Inicialização do banco
+# Inicialização
 # -----------------------------
 init_db()
 seed_data()
+
+# -----------------------------
+# Streamlit App
+# -----------------------------
+st.set_page_config(page_title="Gestão de Visitas", layout="wide")
+st.title("🗂️ Gestão de Visitas - Quitandaria")
+
+# Sessão de login
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+def login(email, password):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, name, role, password_hash, store_id FROM users WHERE email=%s;", (email,))
+    row = cur.fetchone()
+    conn.close()
+    if row and verify_password(password, row[3]):
+        st.session_state.user = {"id": row[0], "name": row[1], "role": row[2], "store_id": row[4]}
+        return True
+    return False
+
+if st.session_state.user is None:
+    with st.form("login_form"):
+        email = st.text_input("Email")
+        password = st.text_input("Senha", type="password")
+        submitted = st.form_submit_button("Login")
+        if submitted:
+            if login(email, password):
+                st.success(f"Bem-vindo {st.session_state.user['name']}!")
+            else:
+                st.error("Email ou senha incorretos.")
+else:
+    user = st.session_state.user
+    st.sidebar.write(f"👤 {user['name']} ({user['role']})")
+    if st.sidebar.button("Logout"):
+        st.session_state.user = None
+        st.experimental_rerun()
+
+    # Dashboard
+    df_visits = get_visits(user)
+    st.subheader("📋 Visitas Agendadas")
+    st.dataframe(df_visits, use_container_width=True)
+
+    # Exportar Excel
+    if st.button("Exportar Excel"):
+        excel_bytes = export_visitas_excel(df_visits)
+        st.download_button(
+            label="Download Excel",
+            data=excel_bytes,
+            file_name=f"visitas_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    # Ações de visitas (concluir, não compareceu, reabrir)
+    st.subheader("🔧 Ações de Visita")
+    visit_ids = df_visits["id"].tolist()
+    selected_visit = st.selectbox("Selecione a visita", visit_ids)
+    manager_comment = st.text_area("Comentário do gerente (opcional)")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("✅ Concluir"):
+            concluir_visit(selected_visit, user["id"], manager_comment)
+            st.success("Visita concluída!")
+            st.experimental_rerun()
+    with col2:
+        if st.button("❌ Não Compareceu"):
+            nao_compareceu_visit(selected_visit, user["id"], manager_comment)
+            st.success("Status atualizado para 'Não Compareceu'.")
+            st.experimental_rerun()
+    with col3:
+        if st.button("🔄 Reabrir"):
+            reabrir_visit(selected_visit)
+            st.success("Visita reaberta para Pendente.")
+            st.experimental_rerun()
+
+    # Cadastro de visita (apenas comercial)
+    if user["role"] == "comercial":
+        st.subheader("➕ Cadastrar Nova Visita")
+        stores_df = get_stores()
+        selected_stores = st.multiselect("Selecione as lojas", options=stores_df["id"], format_func=lambda x: stores_df[stores_df["id"]==x]["name"].values[0])
+        visit_date = st.date_input("Data da visita", date.today())
+        buyer = st.text_input("Comprador")
+        supplier = st.text_input("Fornecedor")
+        segment = st.selectbox("Segmento", SEGMENTOS_FIXOS)
+        warranty = st.text_input("Garantia")
+        info = st.text_area("Informações adicionais")
+        repeat_weekly = st.checkbox("Repetir semanalmente (4 semanas)")
+
+        if st.button("Salvar Visita"):
+            create_visit(selected_stores, visit_date, buyer, supplier, segment, warranty, info, user["id"], repeat_weekly)
+            st.success("Visita(s) cadastrada(s) com sucesso!")
+            st.experimental_rerun()
